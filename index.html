@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - 管理员控制</title>
+    <title>智能出入库 - 人员管理+强制拍照</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        /* 样式与之前相同，此处省略以保证长度，实际运行时完整保留 */
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { background: #f1f5f9; font-family: system-ui, 'Segoe UI', sans-serif; padding: 16px; }
         .app-container { max-width: 550px; margin: 0 auto; background: white; border-radius: 32px; padding: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
@@ -43,8 +42,7 @@
         .badge-in { background: #dff9e6; color: #2b7e3a; padding: 2px 8px; border-radius: 40px; }
         .badge-out { background: #ffe6e5; color: #bc3f33; padding: 2px 8px; border-radius: 40px; }
         .admin-badge { background: #eab308; color: #0f172a; padding: 2px 8px; border-radius: 40px; font-size: 0.7rem; margin-left: 8px; }
-        .login-btn { font-size: 0.7rem; padding: 4px 12px; }
-        i { margin-right: 4px; }
+        .required-star { color: #dc2626; margin-left: 4px; }
     </style>
 </head>
 <body>
@@ -59,10 +57,11 @@
             <button @click="activeTab = 'stock'" :class="['tab-btn', {active: activeTab === 'stock'}]"><i class="fas fa-database"></i> 库存</button>
             <button @click="activeTab = 'batch'" :class="['tab-btn', {active: activeTab === 'batch'}]"><i class="fas fa-layer-group"></i> 批量出入库</button>
             <button @click="activeTab = 'records'" :class="['tab-btn', {active: activeTab === 'records'}]"><i class="fas fa-history"></i> 记录</button>
+            <button @click="activeTab = 'staff'" :class="['tab-btn', {active: activeTab === 'staff'}]"><i class="fas fa-users"></i> 人员管理</button>
             <button @click="activeTab = 'settings'" :class="['tab-btn', {active: activeTab === 'settings'}]"><i class="fas fa-cog"></i> 设置</button>
         </div>
 
-        <!-- 库存页面 -->
+        <!-- 库存页面（管理员可管理） -->
         <div v-show="activeTab === 'stock'">
             <div class="flex-between" style="margin-bottom: 14px;">
                 <span class="card-title" style="border-left:none; padding-left:0;">📦 商品列表</span>
@@ -89,7 +88,7 @@
             <div v-if="!isAdmin" class="text-center mt-2" style="font-size:0.7rem; color:#94a3b8;"><i class="fas fa-lock"></i> 商品管理需管理员权限</div>
         </div>
 
-        <!-- 批量出入库页面（无权限限制） -->
+        <!-- 批量出入库页面（强制拍照+人员必选+库存校验） -->
         <div v-show="activeTab === 'batch'">
             <div class="card">
                 <div class="card-title">📝 批量出入库 <button class="btn-sm" @click="openScannerForBatchAdd"><i class="fas fa-camera"></i> 扫码添加商品</button></div>
@@ -100,33 +99,76 @@
                     <input type="number" v-model.number="item.quantity" min="1" placeholder="数量">
                 </div>
                 <button class="btn-sm" @click="addBatchItem"><i class="fas fa-plus"></i> 增加一行</button>
-                <div class="form-group mt-2"><label>整体备注（文字）</label><textarea v-model="batchRemark" rows="2" placeholder="可选"></textarea></div>
-                <div class="form-group"><label>照片（可选）</label><input type="file" accept="image/*" @change="onPhotoSelected"><div v-if="batchPhotoPreview"><img :src="batchPhotoPreview" style="max-width:80px; border-radius:12px;"></div><button class="btn-sm" @click="clearPhoto" v-if="batchPhotoPreview">清除照片</button></div>
+                
+                <!-- 经手人选择（必选） -->
+                <div class="form-group mt-2">
+                    <label>经手人 <span class="required-star">*</span></label>
+                    <select v-model="selectedStaff" required>
+                        <option :value="null" disabled>-- 请选择经手人 --</option>
+                        <option v-for="s in staffList" :value="s.name">{{ s.name }}</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>整体备注（文字）</label>
+                    <textarea v-model="batchRemark" rows="2" placeholder="可选"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>照片 <span class="required-star">*</span></label>
+                    <input type="file" accept="image/*" @change="onPhotoSelected" required>
+                    <div v-if="batchPhotoPreview"><img :src="batchPhotoPreview" style="max-width:80px; border-radius:12px;"></div>
+                    <button class="btn-sm" @click="clearPhoto" v-if="batchPhotoPreview">清除照片</button>
+                    <div v-if="!batchPhotoBase64 && submittedAttempt" class="error-message" style="font-size:0.7rem; margin-top:4px;">请拍摄或上传照片</div>
+                </div>
                 <button class="btn-primary w-100" @click="submitBatchTransaction" :disabled="submitting">确认批量出入库</button>
             </div>
         </div>
 
-        <!-- 记录页面 -->
+        <!-- 记录页面（显示经手人） -->
         <div v-show="activeTab === 'records'">
             <div class="card-title">📋 历史流水</div>
             <div v-if="transactions.length === 0" class="text-center">暂无记录</div>
             <div v-for="t in transactions.slice().reverse()" :key="t.id" class="record-item">
                 <div class="flex-between"><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'">{{ t.type === 'in' ? '入库' : '出库' }}</span><span>数量: {{ t.quantity }}</span></div>
-                <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span v-if="t.remark_text">📝 {{ t.remark_text.substring(0,20) }}</span></div>
+                <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span>经手人: {{ t.staff_name || '未知' }}</span></div>
+                <div class="flex-between"><span v-if="t.remark_text">📝 {{ t.remark_text }}</span><span v-if="t.photo_data"><i class="fas fa-camera"></i> 有照片</span></div>
                 <div v-if="t.photo_data"><img :src="t.photo_data" style="max-width:60px; border-radius:8px;" @click="showFullImage(t.photo_data)"></div>
             </div>
         </div>
 
-        <!-- 设置页面（只保留备份/恢复，普通用户也可用） -->
-        <div v-show="activeTab === 'settings'">
-            <div class="card"><div class="card-title">💾 文件备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup"><i class="fas fa-download"></i> 备份数据</button><label class="btn-primary" style="background:#334155;"><i class="fas fa-upload"></i> 恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
-            <div class="card"><div class="card-title">📡 实时同步</div><p class="text-center" style="font-size:0.75rem;">当前已启用 Supabase Realtime，数据自动同步。</p></div>
-            <div v-if="!isAdmin" class="card"><div class="card-title">🔐 管理员权限</div><p class="text-center" style="font-size:0.75rem;">如需管理商品（增删改），请点击右上角“管理员”按钮验证密码。</p></div>
+        <!-- 人员管理页面（仅管理员） -->
+        <div v-show="activeTab === 'staff'">
+            <div class="card">
+                <div class="card-title">👥 人员管理 <span v-if="!isAdmin" style="font-size:0.7rem;">(仅管理员可操作)</span></div>
+                <div v-if="!isAdmin" class="text-center" style="padding:32px; color:#94a3b8;">请以管理员身份登录后管理人员</div>
+                <template v-else>
+                    <div class="flex-between" style="margin-bottom:16px;">
+                        <input v-model="newStaffName" placeholder="新人员姓名" style="flex:1; margin-right:8px;">
+                        <button class="btn-primary" @click="addStaff">添加</button>
+                    </div>
+                    <div v-for="s in staffList" :key="s.id" class="flex-between" style="padding:10px 0; border-bottom:1px solid #eef2f6;">
+                        <span>{{ s.name }}</span>
+                        <div>
+                            <button class="btn-sm" @click="editStaff(s)"><i class="fas fa-edit"></i></button>
+                            <button class="btn-sm btn-danger" @click="deleteStaff(s.id)"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </div>
+                </template>
+            </div>
         </div>
 
-        <!-- 商品模态框（只有管理员可见，但组件始终存在，通过 isAdmin 控制打开方式） -->
+        <!-- 设置页面 -->
+        <div v-show="activeTab === 'settings'">
+            <div class="card"><div class="card-title">💾 文件备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup"><i class="fas fa-download"></i> 备份数据</button><label class="btn-primary" style="background:#334155;"><i class="fas fa-upload"></i> 恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
+            <div class="card"><div class="card-title">📡 实时同步</div><p class="text-center" style="font-size:0.75rem;">已启用 Supabase Realtime，数据自动同步。</p></div>
+        </div>
+
+        <!-- 商品模态框 -->
         <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show = false"><div class="modal-container"><h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div></div></div>
         <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible = false"><div class="modal-container"><h3>管理分类</h3><div class="input-group"><input v-model="newCategoryName" placeholder="新分类名称"><button class="btn-primary" @click="addCategory">添加</button></div><div v-for="cat in categoryList" :key="cat" style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid #eef2f6;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button></div></div>
+        
+        <!-- 编辑人员弹窗 -->
+        <div v-if="editStaffModal.show" class="modal-mask" @click.self="editStaffModal.show = false"><div class="modal-container"><h3>编辑人员姓名</h3><input v-model="editStaffModal.name" placeholder="姓名"><div class="flex-between mt-2"><button class="btn-outline" @click="editStaffModal.show=false">取消</button><button class="btn-primary" @click="updateStaff">保存</button></div></div></div>
     </div>
     <div v-if="loadingInitial" class="loading-overlay"><i class="fas fa-spinner fa-pulse"></i> 加载中...<div v-if="initError" class="error-message">{{ initError }}</div></div>
 
@@ -152,8 +194,7 @@
     }
     const supaClient = window.__supaClient__;
 
-    // 管理员密码（请修改为您自己的密码）
-    const ADMIN_PASSWORD = 'admin123';  // 👈 在这里修改密码
+    const ADMIN_PASSWORD = 'lyj9908134';  // 管理员密码
 
     createApp({
         setup() {
@@ -161,25 +202,30 @@
             const activeTab = ref('stock');
             const products = ref([]);
             const transactions = ref([]);
+            const staffList = ref([]);          // 人员列表 [{id, name}]
             const categoryList = ref([]);
             const selectedCategory = ref('');
             const loadingInitial = ref(true);
             const initError = ref('');
             const submitting = ref(false);
+            const submittedAttempt = ref(false); // 用于触发照片必填提示
             
             // 管理员状态
-            const isAdmin = ref(false);   // 是否处于管理员模式
+            const isAdmin = ref(false);
             
             // 批量出入库数据
             const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
             const batchRemark = ref('');
             const batchPhotoBase64 = ref('');
             const batchPhotoPreview = ref('');
+            const selectedStaff = ref(null);      // 选中的经手人姓名
             
-            // 模态框状态
+            // 模态框
             const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } });
             const categoryManagerVisible = ref(false);
             const newCategoryName = ref('');
+            const editStaffModal = ref({ show: false, id: null, name: '' });
+            const newStaffName = ref('');
             
             // 扫码相关
             const scannerModalVisible = ref(false);
@@ -190,6 +236,7 @@
             // 实时订阅
             let productsSubscription = null;
             let transactionsSubscription = null;
+            let staffSubscription = null;
             
             // 辅助函数
             const formatDate = (ts) => { const d = new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`; };
@@ -199,12 +246,18 @@
             // 加载数据
             const loadData = async () => {
                 try {
-                    const { data: prods, error: pErr } = await supaClient.from('products').select('*').order('id');
-                    if (pErr) throw pErr;
-                    products.value = prods || [];
-                    const { data: trans, error: tErr } = await supaClient.from('transactions').select('*').order('timestamp', { ascending: false });
-                    if (tErr) throw tErr;
-                    transactions.value = trans || [];
+                    const [prodsRes, transRes, staffRes] = await Promise.all([
+                        supaClient.from('products').select('*').order('id'),
+                        supaClient.from('transactions').select('*').order('timestamp', { ascending: false }),
+                        supaClient.from('staffs').select('*').order('id')
+                    ]);
+                    if (prodsRes.error) throw prodsRes.error;
+                    if (transRes.error) throw transRes.error;
+                    if (staffRes.error) throw staffRes.error;
+                    products.value = prodsRes.data || [];
+                    transactions.value = transRes.data || [];
+                    staffList.value = staffRes.data || [];
+                    // 分类列表
                     const cats = new Set();
                     products.value.forEach(p => { if(p.category && p.category.trim()) cats.add(p.category.trim()); });
                     const stored = localStorage.getItem('custom_categories');
@@ -218,18 +271,14 @@
                 }
             };
             
-            // 设置实时订阅
+            // 实时订阅
             const setupRealtime = () => {
                 if (productsSubscription) productsSubscription.unsubscribe();
                 if (transactionsSubscription) transactionsSubscription.unsubscribe();
-                productsSubscription = supaClient
-                    .channel('products-changes')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => loadData())
-                    .subscribe();
-                transactionsSubscription = supaClient
-                    .channel('transactions-changes')
-                    .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => loadData())
-                    .subscribe();
+                if (staffSubscription) staffSubscription.unsubscribe();
+                productsSubscription = supaClient.channel('products-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => loadData()).subscribe();
+                transactionsSubscription = supaClient.channel('transactions-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => loadData()).subscribe();
+                staffSubscription = supaClient.channel('staffs-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'staffs' }, () => loadData()).subscribe();
             };
             
             // ----- 管理员验证 -----
@@ -237,19 +286,17 @@
                 const pwd = prompt('请输入管理员密码：');
                 if (pwd === ADMIN_PASSWORD) {
                     isAdmin.value = true;
-                    alert('管理员模式已启用，现在可以管理商品。');
-                } else if (pwd !== null) {
-                    alert('密码错误，无法进入管理员模式。');
-                }
+                    alert('管理员模式已启用，现在可以管理商品和人员。');
+                } else if (pwd !== null) alert('密码错误，无法进入管理员模式。');
             };
             const logoutAdmin = () => {
                 isAdmin.value = false;
                 alert('已退出管理员模式。');
             };
             
-            // ----- 商品操作（仅管理员可调用，但函数保留，由 isAdmin 控制按钮显示）-----
+            // ----- 商品操作（仅管理员）-----
             const saveProduct = async () => {
-                if (!isAdmin.value) { alert('无权限，请先以管理员身份登录'); return; }
+                if (!isAdmin.value) { alert('无权限'); return; }
                 const f = productModal.value.form;
                 if(!f.name.trim()) { alert('请输入名称'); return; }
                 if(!f.barcode.trim()) { alert('请输入条码'); return; }
@@ -277,7 +324,7 @@
                 else productModal.value = { show: true, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } };
             };
             
-            // ----- 分类管理（仅管理员）-----
+            // 分类管理（仅管理员）
             const openCategoryManager = () => {
                 if (!isAdmin.value) { alert('请先以管理员身份登录'); return; }
                 categoryManagerVisible.value = true;
@@ -296,14 +343,65 @@
                 localStorage.setItem('custom_categories', JSON.stringify(categoryList.value));
             };
             
-            // ----- 批量出入库（无权限限制）-----
+            // ----- 人员管理（仅管理员）-----
+            const addStaff = async () => {
+                if (!isAdmin.value) { alert('无权限'); return; }
+                const name = newStaffName.value.trim();
+                if(!name) { alert('请输入姓名'); return; }
+                try {
+                    const { error } = await supaClient.from('staffs').insert({ name });
+                    if (error) throw error;
+                    await loadData();
+                    newStaffName.value = '';
+                } catch(e) { alert('添加失败: ' + e.message); }
+            };
+            const editStaff = (staff) => {
+                if (!isAdmin.value) { alert('无权限'); return; }
+                editStaffModal.value = { show: true, id: staff.id, name: staff.name };
+            };
+            const updateStaff = async () => {
+                const name = editStaffModal.value.name.trim();
+                if(!name) { alert('姓名不能为空'); return; }
+                try {
+                    const { error } = await supaClient.from('staffs').update({ name }).eq('id', editStaffModal.value.id);
+                    if (error) throw error;
+                    await loadData();
+                    editStaffModal.value.show = false;
+                } catch(e) { alert('修改失败: ' + e.message); }
+            };
+            const deleteStaff = async (id) => {
+                if (!isAdmin.value) { alert('无权限'); return; }
+                if(!confirm('确定删除该人员？')) return;
+                try {
+                    const { error } = await supaClient.from('staffs').delete().eq('id', id);
+                    if (error) throw error;
+                    await loadData();
+                } catch(e) { alert('删除失败: ' + e.message); }
+            };
+            
+            // ----- 批量出入库（强制照片+库存校验+经手人必选）-----
             const submitBatchTransaction = async () => {
+                submittedAttempt.value = true;
+                // 验证照片
+                if (!batchPhotoBase64.value) {
+                    alert('请拍摄或上传照片');
+                    return;
+                }
+                // 验证经手人
+                if (!selectedStaff.value) {
+                    alert('请选择经手人');
+                    return;
+                }
                 if(batchItems.value.length === 0) { alert('至少添加一行商品'); return; }
+                // 库存校验（出库时）
                 for(let item of batchItems.value) {
                     if(!item.productId) { alert('请选择所有商品'); return; }
                     if(item.quantity <= 0) { alert('数量必须大于0'); return; }
                     const p = products.value.find(p=>p.id === item.productId);
-                    if(item.type === 'out' && p.stock < item.quantity) { alert(`商品 ${p.name} 库存不足`); return; }
+                    if(item.type === 'out' && p.stock < item.quantity) {
+                        alert(`商品 ${p.name} 库存不足！当前库存 ${p.stock}，出库数量 ${item.quantity}`);
+                        return;
+                    }
                 }
                 submitting.value = true;
                 try {
@@ -312,16 +410,23 @@
                         const newStock = item.type === 'in' ? p.stock + item.quantity : p.stock - item.quantity;
                         await supaClient.from('products').update({ stock: newStock }).eq('id', item.productId);
                         await supaClient.from('transactions').insert({
-                            product_id: item.productId, type: item.type, quantity: item.quantity,
-                            timestamp: Date.now(), remark_text: batchRemark.value || null,
-                            photo_data: batchPhotoBase64.value || null
+                            product_id: item.productId,
+                            type: item.type,
+                            quantity: item.quantity,
+                            timestamp: Date.now(),
+                            remark_text: batchRemark.value || null,
+                            photo_data: batchPhotoBase64.value,
+                            staff_name: selectedStaff.value
                         });
                     }
                     await loadData();
+                    // 重置表单
                     batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
                     batchRemark.value = '';
                     batchPhotoBase64.value = '';
                     batchPhotoPreview.value = '';
+                    selectedStaff.value = null;
+                    submittedAttempt.value = false;
                     alert('批量出入库成功');
                 } catch(e) { alert('操作失败: ' + e.message); } finally { submitting.value = false; }
             };
@@ -331,14 +436,21 @@
                 const file = e.target.files[0];
                 if(!file) return;
                 const reader = new FileReader();
-                reader.onload = (ev) => { batchPhotoBase64.value = ev.target.result; batchPhotoPreview.value = ev.target.result; };
+                reader.onload = (ev) => {
+                    batchPhotoBase64.value = ev.target.result;
+                    batchPhotoPreview.value = ev.target.result;
+                    submittedAttempt.value = false; // 照片已上传，清除错误提示
+                };
                 reader.readAsDataURL(file);
             };
-            const clearPhoto = () => { batchPhotoBase64.value = ''; batchPhotoPreview.value = ''; };
+            const clearPhoto = () => {
+                batchPhotoBase64.value = '';
+                batchPhotoPreview.value = '';
+            };
             
-            // ----- 文件备份恢复（无权限限制）-----
+            // ----- 文件备份恢复 -----
             const exportBackup = () => {
-                const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value };
+                const backup = { products: products.value, transactions: transactions.value, staffs: staffList.value, categoryList: categoryList.value };
                 const blob = new Blob([JSON.stringify(backup, null, 2)], {type: "application/json"});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
@@ -357,8 +469,10 @@
                             if(confirm("恢复数据会覆盖当前所有内容，确定吗？")) {
                                 await supaClient.from('products').delete().neq('id', 0);
                                 await supaClient.from('transactions').delete().neq('id', 0);
+                                await supaClient.from('staffs').delete().neq('id', 0);
                                 for(let p of backup.products) await supaClient.from('products').insert(p);
                                 for(let t of backup.transactions) await supaClient.from('transactions').insert(t);
+                                if(backup.staffs) for(let s of backup.staffs) await supaClient.from('staffs').insert(s);
                                 if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
                                 await loadData();
                                 alert("恢复成功");
@@ -370,7 +484,7 @@
                 event.target.value = '';
             };
             
-            // ----- 扫码功能（无权限限制）-----
+            // ----- 扫码功能 -----
             const startScanner = (callback) => {
                 return new Promise((resolve, reject) => {
                     scannerModalVisible.value = true;
@@ -461,17 +575,19 @@
             onUnmounted(() => {
                 if (productsSubscription) productsSubscription.unsubscribe();
                 if (transactionsSubscription) transactionsSubscription.unsubscribe();
+                if (staffSubscription) staffSubscription.unsubscribe();
                 if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop().catch(e=>console.warn);
             });
             
             return {
-                activeTab, products, transactions, categoryList, selectedCategory, loadingInitial, initError, submitting,
-                batchItems, batchRemark, batchPhotoPreview,
+                activeTab, products, transactions, staffList, categoryList, selectedCategory, loadingInitial, initError, submitting, submittedAttempt,
+                batchItems, batchRemark, batchPhotoPreview, selectedStaff,
                 filteredProducts, formatDate, getProductName, showFullImage,
                 isAdmin, showAdminLogin, logoutAdmin,
                 openProductModal, saveProduct, deleteProduct,
                 addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto,
                 openCategoryManager, addCategory, removeCategory, newCategoryName,
+                addStaff, editStaff, updateStaff, deleteStaff, newStaffName, editStaffModal,
                 exportBackup, restoreBackup,
                 openScannerForStockFind, openScannerForBatchAdd,
                 scannerModalVisible, scannerError, closeScannerModal, retryScanner,
