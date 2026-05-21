@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <title>批量出入库管理</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { background: #f1f5f9; font-family: system-ui, 'Segoe UI', 'Helvetica Neue', sans-serif; padding: 16px 12px 32px 12px; }
+        .app-container { max-width: 550px; margin: 0 auto; background: white; border-radius: 32px; box-shadow: 0 8px 20px rgba(0,0,0,0.05); overflow: hidden; padding: 20px 18px 28px; }
+        h1 { font-size: 1.65rem; font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+        h1 i { background: linear-gradient(135deg, #14b8a6, #0d9488); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .tabs { display: flex; gap: 6px; background: #f8fafc; padding: 6px; border-radius: 44px; margin-bottom: 24px; }
+        .tab-btn { flex: 1; text-align: center; padding: 8px 0; border-radius: 40px; font-size: 0.85rem; font-weight: 500; background: transparent; border: none; cursor: pointer; color: #334155; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .tab-btn.active { background: white; color: #0f3b3a; box-shadow: 0 2px 8px rgba(0,0,0,0.04); font-weight: 600; }
+        .card { background: white; border-radius: 24px; padding: 16px; margin-bottom: 20px; border: 1px solid #eef2f6; }
+        .card-title { font-weight: 600; font-size: 1rem; color: #1e293b; display: flex; justify-content: space-between; margin-bottom: 14px; border-left: 4px solid #14b8a6; padding-left: 10px; }
+        .btn-sm { background: #f1f5f9; border: none; padding: 6px 12px; border-radius: 40px; font-size: 0.75rem; font-weight: 500; cursor: pointer; }
+        .btn-primary { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 44px; font-weight: 500; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-outline { background: transparent; border: 1px solid #cbd5e1; padding: 8px 12px; border-radius: 40px; font-size: 0.8rem; cursor: pointer; }
+        .btn-danger { background: #fee2e2; color: #b91c1c; border: none; }
+        .form-group { margin-bottom: 16px; }
+        label { font-size: 0.75rem; font-weight: 500; color: #334155; display: block; margin-bottom: 6px; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 20px; font-size: 0.85rem; background: #fefefe; }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .product-item { background: #fafcff; border-radius: 18px; padding: 12px; margin-bottom: 8px; border: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center; }
+        .product-info .name { font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; }
+        .stock-badge { background: #e6f7f5; padding: 4px 10px; border-radius: 40px; font-size: 0.8rem; font-weight: 600; color: #0f766e; }
+        .stock-warning { background: #fee2e2; color: #b91c1c; }
+        .record-item { font-size: 0.8rem; border-bottom: 1px solid #f0f2f5; padding: 10px 0; }
+        .modal-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-container { background: white; width: 90%; max-width: 450px; border-radius: 32px; padding: 20px; max-height: 85vh; overflow-y: auto; }
+        .input-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .batch-row { background: #f8fafc; border-radius: 20px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+        .photo-preview { max-width: 100px; max-height: 100px; margin-top: 8px; border-radius: 12px; }
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 2000; color: white; }
+        .text-center { text-align: center; }
+        .mt-2 { margin-top: 12px; }
+        .w-100 { width: 100%; }
+        .badge-in { background: #dff9e6; color: #2b7e3a; }
+        .badge-out { background: #ffe6e5; color: #bc3f33; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="app-container" v-if="!loadingInitial">
+        <h1><i class="fas fa-boxes"></i> 批量出入库</h1>
+
+        <div class="tabs">
+            <button @click="activeTab = 'stock'" :class="['tab-btn', {active: activeTab === 'stock'}]"><i class="fas fa-database"></i> 库存</button>
+            <button @click="activeTab = 'batch'" :class="['tab-btn', {active: activeTab === 'batch'}]"><i class="fas fa-layer-group"></i> 批量出入库</button>
+            <button @click="activeTab = 'records'" :class="['tab-btn', {active: activeTab === 'records'}]"><i class="fas fa-history"></i> 记录</button>
+            <button @click="activeTab = 'settings'" :class="['tab-btn', {active: activeTab === 'settings'}]"><i class="fas fa-cog"></i> 设置</button>
+        </div>
+
+        <!-- 库存页面 -->
+        <div v-show="activeTab === 'stock'">
+            <div class="flex-between" style="margin-bottom: 14px;">
+                <span class="card-title" style="border-left:none; padding-left:0;">📦 商品列表</span>
+                <button class="btn-sm" @click="openProductModal()"><i class="fas fa-plus"></i> 新增商品</button>
+            </div>
+            <div class="category-filter" style="display:flex; gap:8px; margin-bottom:16px;">
+                <select v-model="selectedCategory" style="flex:1; border-radius:40px;">
+                    <option value="">全部分类</option>
+                    <option v-for="cat in categoryList" :value="cat">{{ cat }}</option>
+                </select>
+                <button class="btn-sm" @click="openCategoryManager"><i class="fas fa-cog"></i> 管理分类</button>
+            </div>
+            <div v-if="filteredProducts.length === 0" class="text-center" style="padding:32px 0; color:#94a3b8;">暂无商品</div>
+            <div v-for="p in filteredProducts" :key="p.id" class="product-item">
+                <div class="product-info">
+                    <div class="name">{{ p.name }}<span v-if="p.stock <= 1" style="color:#eab308;"><i class="fas fa-exclamation-triangle"></i></span></div>
+                    <div><i class="fas fa-barcode"></i> {{ p.barcode }}</div>
+                    <div><i class="fas fa-tag"></i> {{ p.category || '未分类' }}</div>
+                </div>
+                <div class="flex-between" style="gap:10px;">
+                    <span :class="['stock-badge', p.stock<=1?'stock-warning':'']">库存 {{ p.stock }}</span>
+                    <button class="btn-sm" @click="openProductModal(p)"><i class="fas fa-edit"></i></button>
+                    <button class="btn-sm btn-danger" @click="deleteProduct(p.id)"><i class="fas fa-trash-alt"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 批量出入库页面 -->
+        <div v-show="activeTab === 'batch'">
+            <div class="card">
+                <div class="card-title">📝 批量出入库</div>
+                <div v-for="(item, idx) in batchItems" :key="idx" class="batch-row">
+                    <div class="flex-between" style="margin-bottom:8px;">
+                        <span>商品 {{ idx+1 }}</span>
+                        <button class="btn-sm btn-danger" @click="removeBatchItem(idx)" v-if="batchItems.length>1"><i class="fas fa-trash"></i> 删除</button>
+                    </div>
+                    <div class="form-group">
+                        <label>商品</label>
+                        <select v-model="item.productId">
+                            <option :value="null" disabled>-- 请选择 --</option>
+                            <option v-for="p in products" :value="p.id">{{ p.name }} ({{ p.barcode }}) 库存:{{ p.stock }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>类型</label>
+                        <div class="flex-between">
+                            <button @click="item.type='in'" :class="['btn-sm', item.type==='in'?'btn-primary':'btn-outline']" style="flex:1;">入库</button>
+                            <button @click="item.type='out'" :class="['btn-sm', item.type==='out'?'btn-primary':'btn-outline']" style="flex:1;">出库</button>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>数量</label>
+                        <input type="number" v-model.number="item.quantity" min="1">
+                    </div>
+                </div>
+                <button class="btn-sm" @click="addBatchItem"><i class="fas fa-plus"></i> 增加一行</button>
+                
+                <div class="form-group mt-2">
+                    <label>整体备注（文字）</label>
+                    <textarea v-model="batchRemark" rows="2" placeholder="可选，输入备注信息"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>照片（可选）</label>
+                    <input type="file" accept="image/*" @change="onPhotoSelected">
+                    <div v-if="batchPhotoPreview" class="photo-preview"><img :src="batchPhotoPreview" style="max-width:100%; border-radius:12px;"></div>
+                    <button class="btn-sm" @click="clearPhoto" v-if="batchPhotoPreview">清除照片</button>
+                </div>
+                <button class="btn-primary w-100" @click="submitBatchTransaction" :disabled="submitting">确认批量出入库</button>
+            </div>
+        </div>
+
+        <!-- 记录页面 -->
+        <div v-show="activeTab === 'records'">
+            <div class="card-title">📋 历史流水</div>
+            <div v-if="transactions.length === 0" class="text-center">暂无记录</div>
+            <div v-for="t in transactions.slice().reverse()" :key="t.id" class="record-item">
+                <div class="flex-between">
+                    <span><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'">{{ t.type === 'in' ? '入库' : '出库' }}</span></span>
+                    <span>数量: {{ t.quantity }}</span>
+                </div>
+                <div class="flex-between">
+                    <span>{{ formatDate(t.timestamp) }}</span>
+                    <span v-if="t.remark_text">📝 {{ t.remark_text.substring(0,20) }}</span>
+                </div>
+                <div v-if="t.photo_data" class="mt-2">
+                    <img :src="t.photo_data" style="max-width:60px; max-height:60px; border-radius:8px;" @click="showFullImage(t.photo_data)">
+                </div>
+            </div>
+        </div>
+
+        <!-- 设置页面 -->
+        <div v-show="activeTab === 'settings'">
+            <div class="card">
+                <div class="card-title">📱 二维码备份与恢复</div>
+                <div class="flex-between" style="gap:12px;">
+                    <button class="btn-primary" @click="generateQRBackup"><i class="fas fa-qrcode"></i> 生成备份二维码</button>
+                    <button class="btn-primary" @click="openScannerForRestore"><i class="fas fa-camera"></i> 扫描二维码恢复</button>
+                </div>
+                <p class="mt-2" style="font-size:0.7rem;">将当前数据压缩为二维码，另一台设备扫码即可恢复。</p>
+            </div>
+            <div class="card">
+                <div class="card-title">💾 文件备份</div>
+                <div class="flex-between">
+                    <button class="btn-primary" @click="exportBackup"><i class="fas fa-download"></i> 备份数据 (JSON)</button>
+                    <label class="btn-primary" style="background:#334155; cursor:pointer;">
+                        <i class="fas fa-upload"></i> 恢复备份
+                        <input type="file" accept=".json" @change="restoreBackup" style="display:none;">
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 商品模态框 -->
+        <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show = false">
+            <div class="modal-container">
+                <h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3>
+                <div class="form-group"><label>名称</label><input v-model="productModal.form.name"></div>
+                <div class="form-group"><label>条码</label><div class="input-group"><input v-model="productModal.form.barcode"><button class="btn-sm" @click="openScannerForProduct">扫码</button></div></div>
+                <div class="form-group"><label>分类</label><input v-model="productModal.form.category" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist></div>
+                <div class="form-group" v-if="!productModal.isEdit"><label>初始库存</label><input type="number" v-model="productModal.form.stock"></div>
+                <div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div>
+            </div>
+        </div>
+
+        <!-- 分类管理模态框 -->
+        <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible = false">
+            <div class="modal-container">
+                <h3>管理分类</h3>
+                <div class="input-group"><input v-model="newCategoryName" placeholder="新分类名称"><button class="btn-primary" @click="addCategory">添加</button></div>
+                <div v-for="cat in categoryList" :key="cat" style="display:flex; justify-content:space-between; padding:8px; border-bottom:1px solid #eef2f6;">
+                    <span>{{ cat }}</span>
+                    <button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button>
+                </div>
+                <button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button>
+            </div>
+        </div>
+
+        <!-- 二维码展示 -->
+        <div v-if="qrModalVisible" class="modal-mask" @click.self="qrModalVisible = false">
+            <div class="modal-container text-center">
+                <h3>备份二维码</h3>
+                <div id="qrcodeContainer" style="display:flex; justify-content:center;"></div>
+                <button class="btn-sm mt-2" @click="qrModalVisible = false">关闭</button>
+            </div>
+        </div>
+
+        <!-- 扫码模态框 -->
+        <div v-if="scannerModalVisible" class="modal-mask" @click.self="closeScannerModal">
+            <div class="modal-container">
+                <div class="flex-between"><span>扫描二维码</span><button class="btn-sm" @click="closeScannerModal">✕</button></div>
+                <div id="qr-reader-wrapper" style="width:100%; min-height:280px;"></div>
+                <div v-if="scannerError" class="text-center mt-2" style="color:red;">{{ scannerError }}</div>
+            </div>
+        </div>
+    </div>
+    <div v-if="loadingInitial" class="loading-overlay"><i class="fas fa-spinner fa-pulse"></i> 加载中...</div>
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+    const SUPABASE_URL = 'https://apqdnuwhdfxmxoiymble.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcWRudXdoZGZ4bXhvaXltYmxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNDg5NDIsImV4cCI6MjA5NDkyNDk0Mn0.XIBTin-TbpFdzCJQRP7gISwrHB14QlO3lRQOYmM-Mcs';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    createApp({
+        setup() {
+            const activeTab = ref('stock');
+            const products = ref([]);
+            const transactions = ref([]);
+            const categoryList = ref([]);
+            const selectedCategory = ref('');
+            const loadingInitial = ref(true);
+            const submitting = ref(false);
+            
+            const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
+            const batchRemark = ref('');
+            const batchPhotoBase64 = ref('');
+            const batchPhotoPreview = ref('');
+            
+            const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } });
+            const categoryManagerVisible = ref(false);
+            const newCategoryName = ref('');
+            const qrModalVisible = ref(false);
+            const scannerModalVisible = ref(false);
+            const scannerError = ref('');
+            let html5QrCode = null;
+            
+            const formatDate = (ts) => {
+                const d = new Date(ts);
+                return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+            };
+            const getProductName = (pid) => {
+                const p = products.value.find(i=>i.id === pid);
+                return p ? p.name : '已删除';
+            };
+            const showFullImage = (imgData) => {
+                const win = window.open();
+                win.document.write(`<img src="${imgData}" style="max-width:100%;">`);
+            };
+            
+            const loadData = async () => {
+                try {
+                    const { data: prods, error: pErr } = await supabase.from('products').select('*').order('id');
+                    if (pErr) throw pErr;
+                    products.value = prods || [];
+                    const { data: trans, error: tErr } = await supabase.from('transactions').select('*').order('timestamp', { ascending: false });
+                    if (tErr) throw tErr;
+                    transactions.value = trans || [];
+                    const cats = new Set();
+                    products.value.forEach(p => { if(p.category && p.category.trim()) cats.add(p.category.trim()); });
+                    const stored = localStorage.getItem('custom_categories');
+                    if(stored) {
+                        const storedCats = JSON.parse(stored);
+                        storedCats.forEach(c => cats.add(c));
+                    }
+                    categoryList.value = Array.from(cats).sort();
+                } catch(e) {
+                    console.error(e);
+                    alert('加载数据失败: ' + e.message);
+                }
+            };
+            
+            const saveProduct = async () => {
+                const form = productModal.value.form;
+                if(!form.name.trim()) { alert('请输入名称'); return; }
+                if(!form.barcode.trim()) { alert('请输入条码'); return; }
+                try {
+                    if(!productModal.value.isEdit) {
+                        const { error } = await supabase.from('products').insert({
+                            name: form.name,
+                            barcode: form.barcode,
+                            category: form.category || '未分类',
+                            stock: form.stock >= 0 ? form.stock : 0
+                        });
+                        if(error) throw error;
+                    } else {
+                        const { error } = await supabase.from('products').update({
+                            name: form.name,
+                            barcode: form.barcode,
+                            category: form.category || '未分类'
+                        }).eq('id', form.id);
+                        if(error) throw error;
+                    }
+                    await loadData();
+                    productModal.value.show = false;
+                } catch(e) { alert('保存失败: '+e.message); }
+            };
+            
+            const deleteProduct = async (id) => {
+                if(!confirm('删除商品会同时删除其所有出入库记录，确定吗？')) return;
+                try {
+                    await supabase.from('products').delete().eq('id', id);
+                    await loadData();
+                } catch(e) { alert('删除失败'); }
+            };
+            
+            const submitBatchTransaction = async () => {
+                if(batchItems.value.length === 0) { alert('至少添加一行商品'); return; }
+                for(let item of batchItems.value) {
+                    if(!item.productId) { alert('请选择所有商品'); return; }
+                    if(item.quantity <= 0) { alert('数量必须大于0'); return; }
+                    const product = products.value.find(p=>p.id === item.productId);
+                    if(item.type === 'out' && product.stock < item.quantity) {
+                        alert(`商品 ${product.name} 库存不足，当前库存 ${product.stock}`);
+                        return;
+                    }
+                }
+                submitting.value = true;
+                try {
+                    for(let item of batchItems.value) {
+                        const product = products.value.find(p=>p.id === item.productId);
+                        const newStock = item.type === 'in' ? product.stock + item.quantity : product.stock - item.quantity;
+                        await supabase.from('products').update({ stock: newStock }).eq('id', item.productId);
+                        await supabase.from('transactions').insert({
+                            product_id: item.productId,
+                            type: item.type,
+                            quantity: item.quantity,
+                            timestamp: Date.now(),
+                            remark_text: batchRemark.value || null,
+                            photo_data: batchPhotoBase64.value || null
+                        });
+                    }
+                    await loadData();
+                    batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
+                    batchRemark.value = '';
+                    batchPhotoBase64.value = '';
+                    batchPhotoPreview.value = '';
+                    alert('批量出入库成功');
+                } catch(e) {
+                    alert('操作失败: '+e.message);
+                } finally {
+                    submitting.value = false;
+                }
+            };
+            
+            const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
+            const removeBatchItem = (idx) => batchItems.value.splice(idx,1);
+            const onPhotoSelected = (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    batchPhotoBase64.value = ev.target.result;
+                    batchPhotoPreview.value = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+            const clearPhoto = () => {
+                batchPhotoBase64.value = '';
+                batchPhotoPreview.value = '';
+            };
+            
+            const openCategoryManager = () => { categoryManagerVisible.value = true; };
+            const addCategory = () => {
+                const name = newCategoryName.value.trim();
+                if(!name) return;
+                if(categoryList.value.includes(name)) { alert('分类已存在'); return; }
+                categoryList.value.push(name);
+                localStorage.setItem('custom_categories', JSON.stringify(categoryList.value));
+                newCategoryName.value = '';
+            };
+            const removeCategory = (cat) => {
+                if(confirm(`删除分类“${cat}”不会影响已有商品，确定吗？`)) {
+                    categoryList.value = categoryList.value.filter(c=>c !== cat);
+                    localStorage.setItem('custom_categories', JSON.stringify(categoryList.value));
+                }
+            };
+            
+            const openProductModal = (product = null) => {
+                if(product) productModal.value = { show: true, isEdit: true, form: { ...product } };
+                else productModal.value = { show: true, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } };
+            };
+            
+            const generateQRBackup = () => {
+                const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value, version: "2.0" };
+                const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(backup));
+                if(compressed.length > 2800) alert("数据较大，二维码可能无法容纳，建议使用文件备份");
+                qrModalVisible.value = true;
+                nextTick(() => {
+                    const container = document.getElementById("qrcodeContainer");
+                    if(container) {
+                        container.innerHTML = "";
+                        new QRCode(container, { text: compressed, width: 220, height: 220 });
+                    }
+                });
+            };
+            
+            const openScannerForRestore = async () => {
+                scannerModalVisible.value = true;
+                await nextTick();
+                setTimeout(() => {
+                    const wrapper = document.getElementById('qr-reader-wrapper');
+                    if(wrapper) wrapper.innerHTML = '';
+                    if(html5QrCode) html5QrCode.stop().catch(e=>console.warn);
+                    html5QrCode = new Html5Qrcode("qr-reader-wrapper");
+                    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 260 } },
+                        async (decoded) => {
+                            try {
+                                const decompressed = LZString.decompressFromEncodedURIComponent(decoded);
+                                if(!decompressed) throw new Error("解压失败");
+                                const backup = JSON.parse(decompressed);
+                                if(backup.products && backup.transactions) {
+                                    if(confirm("恢复数据会覆盖当前所有内容，确定吗？")) {
+                                        await supabase.from('products').delete().neq('id', 0);
+                                        await supabase.from('transactions').delete().neq('id', 0);
+                                        for(let p of backup.products) {
+                                            await supabase.from('products').insert({ name: p.name, barcode: p.barcode, category: p.category, stock: p.stock });
+                                        }
+                                        for(let t of backup.transactions) {
+                                            await supabase.from('transactions').insert({ product_id: t.product_id, type: t.type, quantity: t.quantity, timestamp: t.timestamp, remark_text: t.remark_text, photo_data: t.photo_data });
+                                        }
+                                        if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
+                                        await loadData();
+                                        alert("恢复成功");
+                                    }
+                                } else alert("无效备份");
+                            } catch(e) { alert("恢复失败"); }
+                            closeScannerModal();
+                        },
+                        () => {}
+                    ).catch(err => { scannerError.value = "摄像头启动失败"; });
+                }, 100);
+            };
+            
+            const closeScannerModal = async () => {
+                if(html5QrCode && html5QrCode.isScanning) await html5QrCode.stop().catch(e=>console.warn);
+                scannerModalVisible.value = false;
+                scannerError.value = '';
+            };
+            
+            const exportBackup = () => {
+                const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value };
+                const blob = new Blob([JSON.stringify(backup)], {type: "application/json"});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `backup_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(a.href);
+            };
+            
+            const restoreBackup = (event) => {
+                const file = event.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const backup = JSON.parse(e.target.result);
+                        if(confirm("恢复数据会覆盖所有内容，确定吗？")) {
+                            await supabase.from('products').delete().neq('id', 0);
+                            await supabase.from('transactions').delete().neq('id', 0);
+                            for(let p of backup.products) {
+                                await supabase.from('products').insert({ name: p.name, barcode: p.barcode, category: p.category, stock: p.stock });
+                            }
+                            for(let t of backup.transactions) {
+                                await supabase.from('transactions').insert({ product_id: t.product_id, type: t.type, quantity: t.quantity, timestamp: t.timestamp, remark_text: t.remark_text, photo_data: t.photo_data });
+                            }
+                            if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
+                            await loadData();
+                            alert("恢复成功");
+                        }
+                    } catch(err) { alert("文件解析失败"); }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+            
+            const openScannerForProduct = async () => {
+                if(!productModal.value.show) return;
+                scannerModalVisible.value = true;
+                await nextTick();
+                setTimeout(() => {
+                    const wrapper = document.getElementById('qr-reader-wrapper');
+                    if(wrapper) wrapper.innerHTML = '';
+                    if(html5QrCode) html5QrCode.stop().catch(e=>console.warn);
+                    html5QrCode = new Html5Qrcode("qr-reader-wrapper");
+                    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 260 } },
+                        (barcode) => {
+                            productModal.value.form.barcode = barcode;
+                            closeScannerModal();
+                        },
+                        () => {}
+                    ).catch(err => { scannerError.value = "摄像头启动失败"; });
+                }, 100);
+            };
+            
+            const filteredProducts = computed(() => {
+                if(!selectedCategory.value) return products.value;
+                return products.value.filter(p => p.category === selectedCategory.value);
+            });
+            
+            onMounted(async () => {
+                await loadData();
+                loadingInitial.value = false;
+            });
+            
+            return {
+                activeTab, products, transactions, categoryList, selectedCategory, loadingInitial, submitting,
+                batchItems, batchRemark, batchPhotoPreview,
+                filteredProducts, formatDate, getProductName, showFullImage,
+                openProductModal, saveProduct, deleteProduct,
+                addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto,
+                openCategoryManager, addCategory, removeCategory, newCategoryName,
+                generateQRBackup, openScannerForRestore, closeScannerModal, exportBackup, restoreBackup,
+                openScannerForProduct,
+                productModal, categoryManagerVisible, qrModalVisible, scannerModalVisible, scannerError
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
