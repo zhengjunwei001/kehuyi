@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs2@0.0.2/qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
@@ -76,7 +75,6 @@
             <div v-for="p in filteredProducts" :key="p.id" class="product-item">
                 <div class="product-info">
                     <div class="name">{{ p.name }}<span v-if="p.stock <= 1" style="color:#eab308;"><i class="fas fa-exclamation-triangle"></i></span></div>
-                    <div><i class="fas fa-barcode"></i> {{ p.barcode }}</div>
                     <div><i class="fas fa-tag"></i> {{ p.category || '未分类' }}</div>
                 </div>
                 <div class="flex-between" style="gap:10px;">
@@ -100,7 +98,7 @@
                         <label>商品</label>
                         <select v-model="item.productId">
                             <option :value="null" disabled>-- 请选择 --</option>
-                            <option v-for="p in products" :value="p.id">{{ p.name }} ({{ p.barcode }}) 库存:{{ p.stock }}</option>
+                            <option v-for="p in products" :value="p.id">{{ p.name }} (库存:{{ p.stock }})</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -150,18 +148,10 @@
             </div>
         </div>
 
-        <!-- 设置页面 -->
+        <!-- 设置页面（仅保留 JSON 文件备份/恢复） -->
         <div v-show="activeTab === 'settings'">
             <div class="card">
-                <div class="card-title">📱 二维码备份与恢复</div>
-                <div class="flex-between" style="gap:12px;">
-                    <button class="btn-primary" @click="generateQRBackup"><i class="fas fa-qrcode"></i> 生成备份二维码</button>
-                    <button class="btn-primary" @click="openScannerForRestore"><i class="fas fa-camera"></i> 扫描二维码恢复</button>
-                </div>
-                <p class="mt-2" style="font-size:0.7rem;">将当前数据压缩为二维码，另一台设备扫码即可恢复。</p>
-            </div>
-            <div class="card">
-                <div class="card-title">💾 文件备份</div>
+                <div class="card-title">💾 文件备份与恢复</div>
                 <div class="flex-between">
                     <button class="btn-primary" @click="exportBackup"><i class="fas fa-download"></i> 备份数据 (JSON)</button>
                     <label class="btn-primary" style="background:#334155; cursor:pointer;">
@@ -169,6 +159,7 @@
                         <input type="file" accept=".json" @change="restoreBackup" style="display:none;">
                     </label>
                 </div>
+                <p class="mt-2" style="font-size:0.7rem;">将所有商品和出入库记录导出为 JSON 文件，或从 JSON 文件恢复。</p>
             </div>
         </div>
 
@@ -177,7 +168,7 @@
             <div class="modal-container">
                 <h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3>
                 <div class="form-group"><label>名称</label><input v-model="productModal.form.name"></div>
-                <div class="form-group"><label>条码</label><div class="input-group"><input v-model="productModal.form.barcode"><button class="btn-sm" @click="openScannerForProduct">扫码</button></div></div>
+                <div class="form-group"><label>条码</label><input v-model="productModal.form.barcode" placeholder="扫描或输入条码"></div>
                 <div class="form-group"><label>分类</label><input v-model="productModal.form.category" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist></div>
                 <div class="form-group" v-if="!productModal.isEdit"><label>初始库存</label><input type="number" v-model="productModal.form.stock"></div>
                 <div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div>
@@ -196,30 +187,14 @@
                 <button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button>
             </div>
         </div>
-
-        <!-- 二维码展示 -->
-        <div v-if="qrModalVisible" class="modal-mask" @click.self="qrModalVisible = false">
-            <div class="modal-container text-center">
-                <h3>备份二维码</h3>
-                <div id="qrcodeContainer" style="display:flex; justify-content:center;"></div>
-                <button class="btn-sm mt-2" @click="qrModalVisible = false">关闭</button>
-            </div>
-        </div>
-
-        <!-- 扫码模态框 -->
-        <div v-if="scannerModalVisible" class="modal-mask" @click.self="closeScannerModal">
-            <div class="modal-container">
-                <div class="flex-between"><span>扫描二维码</span><button class="btn-sm" @click="closeScannerModal">✕</button></div>
-                <div id="qr-reader-wrapper" style="width:100%; min-height:280px;"></div>
-                <div v-if="scannerError" class="text-center mt-2" style="color:red;">{{ scannerError }}</div>
-            </div>
-        </div>
     </div>
     <div v-if="loadingInitial" class="loading-overlay"><i class="fas fa-spinner fa-pulse"></i> 加载中...</div>
 </div>
 
 <script>
-    const { createApp, ref, computed, onMounted, nextTick } = Vue;
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    // Supabase 配置
     const SUPABASE_URL = 'https://apqdnuwhdfxmxoiymble.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcWRudXdoZGZ4bXhvaXltYmxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNDg5NDIsImV4cCI6MjA5NDkyNDk0Mn0.XIBTin-TbpFdzCJQRP7gISwrHB14QlO3lRQOYmM-Mcs';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -234,19 +209,18 @@
             const loadingInitial = ref(true);
             const submitting = ref(false);
             
+            // 批量出入库数据
             const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
             const batchRemark = ref('');
             const batchPhotoBase64 = ref('');
             const batchPhotoPreview = ref('');
             
+            // UI 状态
             const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } });
             const categoryManagerVisible = ref(false);
             const newCategoryName = ref('');
-            const qrModalVisible = ref(false);
-            const scannerModalVisible = ref(false);
-            const scannerError = ref('');
-            let html5QrCode = null;
             
+            // 辅助函数
             const formatDate = (ts) => {
                 const d = new Date(ts);
                 return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
@@ -260,6 +234,7 @@
                 win.document.write(`<img src="${imgData}" style="max-width:100%;">`);
             };
             
+            // 加载数据
             const loadData = async () => {
                 try {
                     const { data: prods, error: pErr } = await supabase.from('products').select('*').order('id');
@@ -272,8 +247,7 @@
                     products.value.forEach(p => { if(p.category && p.category.trim()) cats.add(p.category.trim()); });
                     const stored = localStorage.getItem('custom_categories');
                     if(stored) {
-                        const storedCats = JSON.parse(stored);
-                        storedCats.forEach(c => cats.add(c));
+                        JSON.parse(stored).forEach(c => cats.add(c));
                     }
                     categoryList.value = Array.from(cats).sort();
                 } catch(e) {
@@ -282,6 +256,7 @@
                 }
             };
             
+            // 保存商品
             const saveProduct = async () => {
                 const form = productModal.value.form;
                 if(!form.name.trim()) { alert('请输入名称'); return; }
@@ -308,6 +283,7 @@
                 } catch(e) { alert('保存失败: '+e.message); }
             };
             
+            // 删除商品
             const deleteProduct = async (id) => {
                 if(!confirm('删除商品会同时删除其所有出入库记录，确定吗？')) return;
                 try {
@@ -316,6 +292,7 @@
                 } catch(e) { alert('删除失败'); }
             };
             
+            // 批量出入库提交
             const submitBatchTransaction = async () => {
                 if(batchItems.value.length === 0) { alert('至少添加一行商品'); return; }
                 for(let item of batchItems.value) {
@@ -372,6 +349,7 @@
                 batchPhotoPreview.value = '';
             };
             
+            // 分类管理
             const openCategoryManager = () => { categoryManagerVisible.value = true; };
             const addCategory = () => {
                 const name = newCategoryName.value.trim();
@@ -393,73 +371,17 @@
                 else productModal.value = { show: true, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } };
             };
             
-            const generateQRBackup = () => {
-                const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value, version: "2.0" };
-                const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(backup));
-                if(compressed.length > 2800) alert("数据较大，二维码可能无法容纳，建议使用文件备份");
-                qrModalVisible.value = true;
-                nextTick(() => {
-                    const container = document.getElementById("qrcodeContainer");
-                    if(container) {
-                        container.innerHTML = "";
-                        new QRCode(container, { text: compressed, width: 220, height: 220 });
-                    }
-                });
-            };
-            
-            const openScannerForRestore = async () => {
-                scannerModalVisible.value = true;
-                await nextTick();
-                setTimeout(() => {
-                    const wrapper = document.getElementById('qr-reader-wrapper');
-                    if(wrapper) wrapper.innerHTML = '';
-                    if(html5QrCode) html5QrCode.stop().catch(e=>console.warn);
-                    html5QrCode = new Html5Qrcode("qr-reader-wrapper");
-                    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 260 } },
-                        async (decoded) => {
-                            try {
-                                const decompressed = LZString.decompressFromEncodedURIComponent(decoded);
-                                if(!decompressed) throw new Error("解压失败");
-                                const backup = JSON.parse(decompressed);
-                                if(backup.products && backup.transactions) {
-                                    if(confirm("恢复数据会覆盖当前所有内容，确定吗？")) {
-                                        await supabase.from('products').delete().neq('id', 0);
-                                        await supabase.from('transactions').delete().neq('id', 0);
-                                        for(let p of backup.products) {
-                                            await supabase.from('products').insert({ name: p.name, barcode: p.barcode, category: p.category, stock: p.stock });
-                                        }
-                                        for(let t of backup.transactions) {
-                                            await supabase.from('transactions').insert({ product_id: t.product_id, type: t.type, quantity: t.quantity, timestamp: t.timestamp, remark_text: t.remark_text, photo_data: t.photo_data });
-                                        }
-                                        if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
-                                        await loadData();
-                                        alert("恢复成功");
-                                    }
-                                } else alert("无效备份");
-                            } catch(e) { alert("恢复失败"); }
-                            closeScannerModal();
-                        },
-                        () => {}
-                    ).catch(err => { scannerError.value = "摄像头启动失败"; });
-                }, 100);
-            };
-            
-            const closeScannerModal = async () => {
-                if(html5QrCode && html5QrCode.isScanning) await html5QrCode.stop().catch(e=>console.warn);
-                scannerModalVisible.value = false;
-                scannerError.value = '';
-            };
-            
+            // JSON 文件备份/恢复
             const exportBackup = () => {
                 const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value };
-                const blob = new Blob([JSON.stringify(backup)], {type: "application/json"});
+                const blob = new Blob([JSON.stringify(backup, null, 2)], {type: "application/json"});
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);
-                a.download = `backup_${Date.now()}.json`;
+                a.download = `stock_backup_${Date.now()}.json`;
                 a.click();
                 URL.revokeObjectURL(a.href);
+                alert('备份导出成功');
             };
-            
             const restoreBackup = (event) => {
                 const file = event.target.files[0];
                 if(!file) return;
@@ -467,42 +389,32 @@
                 reader.onload = async (e) => {
                     try {
                         const backup = JSON.parse(e.target.result);
-                        if(confirm("恢复数据会覆盖所有内容，确定吗？")) {
-                            await supabase.from('products').delete().neq('id', 0);
-                            await supabase.from('transactions').delete().neq('id', 0);
-                            for(let p of backup.products) {
-                                await supabase.from('products').insert({ name: p.name, barcode: p.barcode, category: p.category, stock: p.stock });
+                        if(backup.products && backup.transactions) {
+                            if(confirm("恢复数据会覆盖当前所有内容，确定吗？")) {
+                                await supabase.from('products').delete().neq('id', 0);
+                                await supabase.from('transactions').delete().neq('id', 0);
+                                for(let p of backup.products) {
+                                    await supabase.from('products').insert({ name: p.name, barcode: p.barcode, category: p.category, stock: p.stock });
+                                }
+                                for(let t of backup.transactions) {
+                                    await supabase.from('transactions').insert({
+                                        product_id: t.product_id,
+                                        type: t.type,
+                                        quantity: t.quantity,
+                                        timestamp: t.timestamp,
+                                        remark_text: t.remark_text,
+                                        photo_data: t.photo_data
+                                    });
+                                }
+                                if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
+                                await loadData();
+                                alert("恢复成功");
                             }
-                            for(let t of backup.transactions) {
-                                await supabase.from('transactions').insert({ product_id: t.product_id, type: t.type, quantity: t.quantity, timestamp: t.timestamp, remark_text: t.remark_text, photo_data: t.photo_data });
-                            }
-                            if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
-                            await loadData();
-                            alert("恢复成功");
-                        }
-                    } catch(err) { alert("文件解析失败"); }
+                        } else alert("无效备份文件");
+                    } catch(err) { alert("解析失败"); }
                 };
                 reader.readAsText(file);
                 event.target.value = '';
-            };
-            
-            const openScannerForProduct = async () => {
-                if(!productModal.value.show) return;
-                scannerModalVisible.value = true;
-                await nextTick();
-                setTimeout(() => {
-                    const wrapper = document.getElementById('qr-reader-wrapper');
-                    if(wrapper) wrapper.innerHTML = '';
-                    if(html5QrCode) html5QrCode.stop().catch(e=>console.warn);
-                    html5QrCode = new Html5Qrcode("qr-reader-wrapper");
-                    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 260, height: 260 } },
-                        (barcode) => {
-                            productModal.value.form.barcode = barcode;
-                            closeScannerModal();
-                        },
-                        () => {}
-                    ).catch(err => { scannerError.value = "摄像头启动失败"; });
-                }, 100);
             };
             
             const filteredProducts = computed(() => {
@@ -522,9 +434,8 @@
                 openProductModal, saveProduct, deleteProduct,
                 addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto,
                 openCategoryManager, addCategory, removeCategory, newCategoryName,
-                generateQRBackup, openScannerForRestore, closeScannerModal, exportBackup, restoreBackup,
-                openScannerForProduct,
-                productModal, categoryManagerVisible, qrModalVisible, scannerModalVisible, scannerError
+                exportBackup, restoreBackup,
+                productModal, categoryManagerVisible
             };
         }
     }).mount('#app');
