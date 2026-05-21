@@ -33,12 +33,13 @@
         .modal-container { background: white; width: 90%; max-width: 450px; border-radius: 32px; padding: 20px; max-height: 85vh; overflow-y: auto; }
         .batch-row { background: #f8fafc; border-radius: 20px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
         .photo-preview { max-width: 100px; margin-top: 8px; border-radius: 12px; }
-        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 2000; color: white; }
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 2000; color: white; font-size: 1rem; }
         .text-center { text-align: center; }
         .mt-2 { margin-top: 12px; }
         .w-100 { width: 100%; }
         .badge-in { background: #dff9e6; color: #2b7e3a; }
         .badge-out { background: #ffe6e5; color: #bc3f33; }
+        .error-message { color: #dc2626; background: #fee2e2; padding: 12px; border-radius: 20px; margin-top: 16px; }
     </style>
 </head>
 <body>
@@ -100,17 +101,21 @@
         <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show = false"><div class="modal-container"><h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="flex-between"><button @click="productModal.show=false">取消</button><button @click="saveProduct">保存</button></div></div></div>
         <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible = false"><div class="modal-container"><h3>管理分类</h3><input v-model="newCategoryName" placeholder="新分类"><button @click="addCategory">添加</button><div v-for="cat in categoryList" :key="cat" style="display:flex; justify-content:space-between; padding:8px;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button @click="categoryManagerVisible=false">关闭</button></div></div>
     </div>
-    <div v-if="loadingInitial" class="loading-overlay">加载中...</div>
+    <div v-if="loadingInitial" class="loading-overlay">
+        <i class="fas fa-spinner fa-pulse"></i> 加载中...
+        <div v-if="initError" class="error-message" style="margin-top:16px;">{{ initError }}</div>
+    </div>
 </div>
 
 <script>
-    // 确保 Supabase 客户端只初始化一次（挂载到 window 下唯一命名）
-    if (!window.__supabase_client__) {
+    // 完全避免使用 "supabase" 作为变量名，改为 supaClient
+    // 将客户端实例挂载到 window 的一个私有属性上，避免多次初始化
+    if (!window.__supaClient__) {
         const SUPABASE_URL = 'https://apqdnuwhdfxmxoiymble.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcWRudXdoZGZ4bXhvaXltYmxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNDg5NDIsImV4cCI6MjA5NDkyNDk0Mn0.XIBTin-TbpFdzCJQRP7gISwrHB14QlO3lRQOYmM-Mcs';
-        window.__supabase_client__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        window.__supaClient__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     }
-    const supabase = window.__supabase_client__;
+    const supaClient = window.__supaClient__;   // 使用不同名字
 
     const { createApp, ref, computed, onMounted } = Vue;
 
@@ -122,6 +127,7 @@
             const categoryList = ref([]);
             const selectedCategory = ref('');
             const loadingInitial = ref(true);
+            const initError = ref('');
             const submitting = ref(false);
             const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
             const batchRemark = ref('');
@@ -137,16 +143,23 @@
 
             const loadData = async () => {
                 try {
-                    const { data: prods } = await supabase.from('products').select('*').order('id');
+                    const { data: prods, error: pErr } = await supaClient.from('products').select('*').order('id');
+                    if (pErr) throw new Error(pErr.message);
                     products.value = prods || [];
-                    const { data: trans } = await supabase.from('transactions').select('*').order('timestamp', { ascending: false });
+                    const { data: trans, error: tErr } = await supaClient.from('transactions').select('*').order('timestamp', { ascending: false });
+                    if (tErr) throw new Error(tErr.message);
                     transactions.value = trans || [];
                     const cats = new Set();
                     products.value.forEach(p => { if(p.category && p.category.trim()) cats.add(p.category.trim()); });
                     const stored = localStorage.getItem('custom_categories');
                     if(stored) JSON.parse(stored).forEach(c => cats.add(c));
                     categoryList.value = Array.from(cats).sort();
-                } catch(e) { alert('加载失败: '+e.message); }
+                    return true;
+                } catch(e) {
+                    console.error(e);
+                    initError.value = e.message || '加载数据失败，请检查网络或 Supabase 配置';
+                    return false;
+                }
             };
 
             const saveProduct = async () => {
@@ -155,18 +168,20 @@
                 if(!f.barcode.trim()) { alert('请输入条码'); return; }
                 try {
                     if(!productModal.value.isEdit) {
-                        await supabase.from('products').insert({ name: f.name, barcode: f.barcode, category: f.category || '未分类', stock: f.stock || 0 });
+                        await supaClient.from('products').insert({ name: f.name, barcode: f.barcode, category: f.category || '未分类', stock: f.stock || 0 });
                     } else {
-                        await supabase.from('products').update({ name: f.name, barcode: f.barcode, category: f.category || '未分类' }).eq('id', f.id);
+                        await supaClient.from('products').update({ name: f.name, barcode: f.barcode, category: f.category || '未分类' }).eq('id', f.id);
                     }
                     await loadData();
                     productModal.value.show = false;
-                } catch(e) { alert('保存失败'); }
+                } catch(e) { alert('保存失败: ' + e.message); }
             };
             const deleteProduct = async (id) => {
                 if(!confirm('删除商品会同时删除其所有出入库记录，确定吗？')) return;
-                await supabase.from('products').delete().eq('id', id);
-                await loadData();
+                try {
+                    await supaClient.from('products').delete().eq('id', id);
+                    await loadData();
+                } catch(e) { alert('删除失败: ' + e.message); }
             };
             const submitBatchTransaction = async () => {
                 for(let item of batchItems.value) {
@@ -180,8 +195,8 @@
                     for(let item of batchItems.value) {
                         const p = products.value.find(p=>p.id === item.productId);
                         const newStock = item.type === 'in' ? p.stock + item.quantity : p.stock - item.quantity;
-                        await supabase.from('products').update({ stock: newStock }).eq('id', item.productId);
-                        await supabase.from('transactions').insert({
+                        await supaClient.from('products').update({ stock: newStock }).eq('id', item.productId);
+                        await supaClient.from('transactions').insert({
                             product_id: item.productId, type: item.type, quantity: item.quantity,
                             timestamp: Date.now(), remark_text: batchRemark.value || null,
                             photo_data: batchPhotoBase64.value || null
@@ -193,7 +208,7 @@
                     batchPhotoBase64.value = '';
                     batchPhotoPreview.value = '';
                     alert('批量出入库成功');
-                } catch(e) { alert('操作失败'); } finally { submitting.value = false; }
+                } catch(e) { alert('操作失败: ' + e.message); } finally { submitting.value = false; }
             };
             const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
             const removeBatchItem = (idx) => batchItems.value.splice(idx,1);
@@ -238,16 +253,16 @@
                         const backup = JSON.parse(e.target.result);
                         if(backup.products && backup.transactions) {
                             if(confirm("覆盖当前数据？")) {
-                                await supabase.from('products').delete().neq('id', 0);
-                                await supabase.from('transactions').delete().neq('id', 0);
-                                for(let p of backup.products) await supabase.from('products').insert(p);
-                                for(let t of backup.transactions) await supabase.from('transactions').insert(t);
+                                await supaClient.from('products').delete().neq('id', 0);
+                                await supaClient.from('transactions').delete().neq('id', 0);
+                                for(let p of backup.products) await supaClient.from('products').insert(p);
+                                for(let t of backup.transactions) await supaClient.from('transactions').insert(t);
                                 if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
                                 await loadData();
                                 alert("恢复成功");
                             }
                         } else alert("无效备份");
-                    } catch(err) { alert("解析失败"); }
+                    } catch(err) { alert("解析失败: " + err.message); }
                 };
                 reader.readAsText(file);
                 event.target.value = '';
@@ -256,8 +271,14 @@
                 if(!selectedCategory.value) return products.value;
                 return products.value.filter(p => p.category === selectedCategory.value);
             });
-            onMounted(async () => { await loadData(); loadingInitial.value = false; });
-            return { activeTab, products, transactions, categoryList, selectedCategory, loadingInitial, submitting, batchItems, batchRemark, batchPhotoPreview, filteredProducts, formatDate, getProductName, showFullImage, openProductModal, saveProduct, deleteProduct, addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto, openCategoryManager, addCategory, removeCategory, newCategoryName, exportBackup, restoreBackup, productModal, categoryManagerVisible };
+            onMounted(async () => {
+                const ok = await loadData();
+                loadingInitial.value = false;
+                if (!ok && !initError.value) {
+                    initError.value = '无法连接 Supabase，请检查网络或配置';
+                }
+            });
+            return { activeTab, products, transactions, categoryList, selectedCategory, loadingInitial, initError, submitting, batchItems, batchRemark, batchPhotoPreview, filteredProducts, formatDate, getProductName, showFullImage, openProductModal, saveProduct, deleteProduct, addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto, openCategoryManager, addCategory, removeCategory, newCategoryName, exportBackup, restoreBackup, productModal, categoryManagerVisible };
         }
     }).mount('#app');
 </script>
