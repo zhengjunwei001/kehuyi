@@ -1,23 +1,265 @@
 <!DOCTYPE html>
-<html>
-<head><title>Supabase Test</title></head>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>批量出入库管理</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #f1f5f9; font-family: system-ui, sans-serif; padding: 16px; }
+        .app-container { max-width: 550px; margin: 0 auto; background: white; border-radius: 32px; padding: 20px; }
+        .tabs { display: flex; gap: 6px; background: #f8fafc; padding: 6px; border-radius: 44px; margin-bottom: 24px; }
+        .tab-btn { flex: 1; text-align: center; padding: 8px 0; border-radius: 40px; background: transparent; border: none; cursor: pointer; }
+        .tab-btn.active { background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04); font-weight: 600; }
+        .card { background: white; border-radius: 24px; padding: 16px; margin-bottom: 20px; border: 1px solid #eef2f6; }
+        .card-title { font-weight: 600; font-size: 1rem; margin-bottom: 14px; border-left: 4px solid #14b8a6; padding-left: 10px; }
+        .btn-sm { background: #f1f5f9; border: none; padding: 6px 12px; border-radius: 40px; cursor: pointer; }
+        .btn-primary { background: #0f172a; color: white; border: none; padding: 10px 16px; border-radius: 44px; cursor: pointer; }
+        .btn-danger { background: #fee2e2; color: #b91c1c; }
+        .form-group { margin-bottom: 16px; }
+        label { font-size: 0.75rem; font-weight: 500; display: block; margin-bottom: 6px; }
+        input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 20px; }
+        .flex-between { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .product-item { background: #fafcff; border-radius: 18px; padding: 12px; margin-bottom: 8px; border: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center; }
+        .stock-badge { background: #e6f7f5; padding: 4px 10px; border-radius: 40px; font-weight: 600; }
+        .stock-warning { background: #fee2e2; color: #b91c1c; }
+        .record-item { font-size: 0.8rem; border-bottom: 1px solid #f0f2f5; padding: 10px 0; }
+        .modal-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-container { background: white; width: 90%; max-width: 450px; border-radius: 32px; padding: 20px; max-height: 85vh; overflow-y: auto; }
+        .batch-row { background: #f8fafc; border-radius: 20px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
+        .photo-preview { max-width: 100px; margin-top: 8px; border-radius: 12px; }
+        .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 2000; color: white; }
+        .text-center { text-align: center; }
+        .mt-2 { margin-top: 12px; }
+        .w-100 { width: 100%; }
+        .badge-in { background: #dff9e6; color: #2b7e3a; }
+        .badge-out { background: #ffe6e5; color: #bc3f33; }
+    </style>
+</head>
 <body>
-<h1>Supabase 连接测试</h1>
-<pre id="log"></pre>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<div id="app">
+    <div class="app-container" v-if="!loadingInitial">
+        <h1><i class="fas fa-boxes"></i> 批量出入库</h1>
+        <div class="tabs">
+            <button @click="activeTab = 'stock'" :class="['tab-btn', {active: activeTab === 'stock'}]">📦 库存</button>
+            <button @click="activeTab = 'batch'" :class="['tab-btn', {active: activeTab === 'batch'}]">📦 批量出入库</button>
+            <button @click="activeTab = 'records'" :class="['tab-btn', {active: activeTab === 'records'}]">📋 记录</button>
+            <button @click="activeTab = 'settings'" :class="['tab-btn', {active: activeTab === 'settings'}]">⚙️ 设置</button>
+        </div>
+
+        <!-- 库存页面 -->
+        <div v-show="activeTab === 'stock'">
+            <div class="flex-between"><span class="card-title" style="border-left:none;">📦 商品列表</span><button class="btn-sm" @click="openProductModal()">+ 新增</button></div>
+            <div class="flex-between"><select v-model="selectedCategory" style="flex:1;"><option value="">全部分类</option><option v-for="cat in categoryList" :value="cat">{{ cat }}</option></select><button class="btn-sm" @click="openCategoryManager">管理分类</button></div>
+            <div v-if="filteredProducts.length === 0" class="text-center">暂无商品</div>
+            <div v-for="p in filteredProducts" :key="p.id" class="product-item">
+                <div><strong>{{ p.name }}</strong> <span v-if="p.stock <= 1">⚠️</span><br><small>{{ p.category || '未分类' }}</small></div>
+                <div class="flex-between"><span :class="['stock-badge', p.stock<=1?'stock-warning':'']">库存 {{ p.stock }}</span><button class="btn-sm" @click="openProductModal(p)">✏️</button><button class="btn-sm btn-danger" @click="deleteProduct(p.id)">🗑️</button></div>
+            </div>
+        </div>
+
+        <!-- 批量出入库页面 -->
+        <div v-show="activeTab === 'batch'">
+            <div class="card">
+                <div class="card-title">📝 批量出入库</div>
+                <div v-for="(item, idx) in batchItems" :key="idx" class="batch-row">
+                    <div class="flex-between"><span>商品 {{ idx+1 }}</span><button class="btn-sm btn-danger" @click="removeBatchItem(idx)" v-if="batchItems.length>1">删除</button></div>
+                    <select v-model="item.productId" class="form-group"><option :value="null">-- 请选择 --</option><option v-for="p in products" :value="p.id">{{ p.name }} (库存:{{ p.stock }})</option></select>
+                    <div class="flex-between"><button @click="item.type='in'" :class="['btn-sm', item.type==='in'?'btn-primary':'btn-outline']" style="flex:1;">入库</button><button @click="item.type='out'" :class="['btn-sm', item.type==='out'?'btn-primary':'btn-outline']" style="flex:1;">出库</button></div>
+                    <input type="number" v-model.number="item.quantity" min="1" placeholder="数量">
+                </div>
+                <button class="btn-sm" @click="addBatchItem">+ 增加一行</button>
+                <div class="form-group"><label>整体备注</label><textarea v-model="batchRemark" rows="2"></textarea></div>
+                <div><label>照片</label><input type="file" accept="image/*" @change="onPhotoSelected"><div v-if="batchPhotoPreview"><img :src="batchPhotoPreview" style="max-width:80px;"></div><button @click="clearPhoto" v-if="batchPhotoPreview">清除</button></div>
+                <button class="btn-primary w-100" @click="submitBatchTransaction" :disabled="submitting">确认批量出入库</button>
+            </div>
+        </div>
+
+        <!-- 记录页面 -->
+        <div v-show="activeTab === 'records'">
+            <div class="card-title">📋 历史流水</div>
+            <div v-if="transactions.length === 0">暂无记录</div>
+            <div v-for="t in transactions.slice().reverse()" :key="t.id" class="record-item">
+                <div class="flex-between"><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'">{{ t.type === 'in' ? '入库' : '出库' }}</span><span>数量: {{ t.quantity }}</span></div>
+                <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span v-if="t.remark_text">📝 {{ t.remark_text.substring(0,20) }}</span></div>
+                <div v-if="t.photo_data"><img :src="t.photo_data" style="max-width:60px;" @click="showFullImage(t.photo_data)"></div>
+            </div>
+        </div>
+
+        <!-- 设置页面 -->
+        <div v-show="activeTab === 'settings'">
+            <div class="card"><div class="card-title">💾 文件备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup">备份数据</button><label class="btn-primary" style="background:#334155;">恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
+        </div>
+
+        <!-- 模态框 -->
+        <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show = false"><div class="modal-container"><h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="flex-between"><button @click="productModal.show=false">取消</button><button @click="saveProduct">保存</button></div></div></div>
+        <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible = false"><div class="modal-container"><h3>管理分类</h3><input v-model="newCategoryName" placeholder="新分类"><button @click="addCategory">添加</button><div v-for="cat in categoryList" :key="cat" style="display:flex; justify-content:space-between; padding:8px;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button @click="categoryManagerVisible=false">关闭</button></div></div>
+    </div>
+    <div v-if="loadingInitial" class="loading-overlay">加载中...</div>
+</div>
+
 <script>
-    // 确保只声明一次
-    if (typeof window._supabaseTest === 'undefined') {
+    // 确保 Supabase 客户端只初始化一次（挂载到 window 下唯一命名）
+    if (!window.__supabase_client__) {
         const SUPABASE_URL = 'https://apqdnuwhdfxmxoiymble.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcWRudXdoZGZ4bXhvaXltYmxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzNDg5NDIsImV4cCI6MjA5NDkyNDk0Mn0.XIBTin-TbpFdzCJQRP7gISwrHB14QlO3lRQOYmM-Mcs';
-        window._supabaseTest = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        window.__supabase_client__ = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     }
-    const supabase = window._supabaseTest;
-    document.getElementById('log').innerText = 'Supabase 初始化成功，无重复声明错误。\n正在尝试查询商品表...';
-    supabase.from('products').select('count', { count: 'exact', head: true }).then(({ count, error }) => {
-        if (error) document.getElementById('log').innerText += '\n查询失败：' + error.message;
-        else document.getElementById('log').innerText += '\n✅ 连接成功！当前商品总数：' + count;
-    });
+    const supabase = window.__supabase_client__;
+
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    createApp({
+        setup() {
+            const activeTab = ref('stock');
+            const products = ref([]);
+            const transactions = ref([]);
+            const categoryList = ref([]);
+            const selectedCategory = ref('');
+            const loadingInitial = ref(true);
+            const submitting = ref(false);
+            const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
+            const batchRemark = ref('');
+            const batchPhotoBase64 = ref('');
+            const batchPhotoPreview = ref('');
+            const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } });
+            const categoryManagerVisible = ref(false);
+            const newCategoryName = ref('');
+
+            const formatDate = (ts) => { const d = new Date(ts); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${d.getMinutes()}`; };
+            const getProductName = (pid) => { const p = products.value.find(i=>i.id === pid); return p ? p.name : '已删除'; };
+            const showFullImage = (imgData) => { const w = window.open(); w.document.write(`<img src="${imgData}" style="max-width:100%;">`); };
+
+            const loadData = async () => {
+                try {
+                    const { data: prods } = await supabase.from('products').select('*').order('id');
+                    products.value = prods || [];
+                    const { data: trans } = await supabase.from('transactions').select('*').order('timestamp', { ascending: false });
+                    transactions.value = trans || [];
+                    const cats = new Set();
+                    products.value.forEach(p => { if(p.category && p.category.trim()) cats.add(p.category.trim()); });
+                    const stored = localStorage.getItem('custom_categories');
+                    if(stored) JSON.parse(stored).forEach(c => cats.add(c));
+                    categoryList.value = Array.from(cats).sort();
+                } catch(e) { alert('加载失败: '+e.message); }
+            };
+
+            const saveProduct = async () => {
+                const f = productModal.value.form;
+                if(!f.name.trim()) { alert('请输入名称'); return; }
+                if(!f.barcode.trim()) { alert('请输入条码'); return; }
+                try {
+                    if(!productModal.value.isEdit) {
+                        await supabase.from('products').insert({ name: f.name, barcode: f.barcode, category: f.category || '未分类', stock: f.stock || 0 });
+                    } else {
+                        await supabase.from('products').update({ name: f.name, barcode: f.barcode, category: f.category || '未分类' }).eq('id', f.id);
+                    }
+                    await loadData();
+                    productModal.value.show = false;
+                } catch(e) { alert('保存失败'); }
+            };
+            const deleteProduct = async (id) => {
+                if(!confirm('删除商品会同时删除其所有出入库记录，确定吗？')) return;
+                await supabase.from('products').delete().eq('id', id);
+                await loadData();
+            };
+            const submitBatchTransaction = async () => {
+                for(let item of batchItems.value) {
+                    if(!item.productId) { alert('请选择所有商品'); return; }
+                    if(item.quantity <= 0) { alert('数量必须大于0'); return; }
+                    const p = products.value.find(p=>p.id === item.productId);
+                    if(item.type === 'out' && p.stock < item.quantity) { alert(`${p.name} 库存不足`); return; }
+                }
+                submitting.value = true;
+                try {
+                    for(let item of batchItems.value) {
+                        const p = products.value.find(p=>p.id === item.productId);
+                        const newStock = item.type === 'in' ? p.stock + item.quantity : p.stock - item.quantity;
+                        await supabase.from('products').update({ stock: newStock }).eq('id', item.productId);
+                        await supabase.from('transactions').insert({
+                            product_id: item.productId, type: item.type, quantity: item.quantity,
+                            timestamp: Date.now(), remark_text: batchRemark.value || null,
+                            photo_data: batchPhotoBase64.value || null
+                        });
+                    }
+                    await loadData();
+                    batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
+                    batchRemark.value = '';
+                    batchPhotoBase64.value = '';
+                    batchPhotoPreview.value = '';
+                    alert('批量出入库成功');
+                } catch(e) { alert('操作失败'); } finally { submitting.value = false; }
+            };
+            const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
+            const removeBatchItem = (idx) => batchItems.value.splice(idx,1);
+            const onPhotoSelected = (e) => {
+                const file = e.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => { batchPhotoBase64.value = ev.target.result; batchPhotoPreview.value = ev.target.result; };
+                reader.readAsDataURL(file);
+            };
+            const clearPhoto = () => { batchPhotoBase64.value = ''; batchPhotoPreview.value = ''; };
+            const openCategoryManager = () => { categoryManagerVisible.value = true; };
+            const addCategory = () => {
+                const name = newCategoryName.value.trim();
+                if(!name || categoryList.value.includes(name)) return;
+                categoryList.value.push(name);
+                localStorage.setItem('custom_categories', JSON.stringify(categoryList.value));
+                newCategoryName.value = '';
+            };
+            const removeCategory = (cat) => {
+                categoryList.value = categoryList.value.filter(c=>c !== cat);
+                localStorage.setItem('custom_categories', JSON.stringify(categoryList.value));
+            };
+            const openProductModal = (product = null) => {
+                if(product) productModal.value = { show: true, isEdit: true, form: { ...product } };
+                else productModal.value = { show: true, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0 } };
+            };
+            const exportBackup = () => {
+                const backup = { products: products.value, transactions: transactions.value, categoryList: categoryList.value };
+                const blob = new Blob([JSON.stringify(backup, null, 2)], {type: "application/json"});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `backup_${Date.now()}.json`;
+                a.click();
+            };
+            const restoreBackup = (event) => {
+                const file = event.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const backup = JSON.parse(e.target.result);
+                        if(backup.products && backup.transactions) {
+                            if(confirm("覆盖当前数据？")) {
+                                await supabase.from('products').delete().neq('id', 0);
+                                await supabase.from('transactions').delete().neq('id', 0);
+                                for(let p of backup.products) await supabase.from('products').insert(p);
+                                for(let t of backup.transactions) await supabase.from('transactions').insert(t);
+                                if(backup.categoryList) localStorage.setItem('custom_categories', JSON.stringify(backup.categoryList));
+                                await loadData();
+                                alert("恢复成功");
+                            }
+                        } else alert("无效备份");
+                    } catch(err) { alert("解析失败"); }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+            const filteredProducts = computed(() => {
+                if(!selectedCategory.value) return products.value;
+                return products.value.filter(p => p.category === selectedCategory.value);
+            });
+            onMounted(async () => { await loadData(); loadingInitial.value = false; });
+            return { activeTab, products, transactions, categoryList, selectedCategory, loadingInitial, submitting, batchItems, batchRemark, batchPhotoPreview, filteredProducts, formatDate, getProductName, showFullImage, openProductModal, saveProduct, deleteProduct, addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto, openCategoryManager, addCategory, removeCategory, newCategoryName, exportBackup, restoreBackup, productModal, categoryManagerVisible };
+        }
+    }).mount('#app');
 </script>
 </body>
 </html>
