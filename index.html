@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - 单品上限控制 | 无数据库改动</title>
+    <title>智能出入库 - 单品上限控制 | 稳定版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -37,7 +37,7 @@
         .batch-row { background: #f8fafc; border-radius: 20px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
         .photo-preview { max-width: 100px; margin-top: 8px; border-radius: 12px; }
         .loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 2000; color: white; font-size: 1rem; flex-direction: column; gap: 16px; }
-        .error-message { background: #dc2626; padding: 12px 20px; border-radius: 40px; font-size: 0.9rem; }
+        .error-message { background: #dc2626; padding: 12px 20px; border-radius: 40px; font-size: 0.9rem; color: white; }
         .text-center { text-align: center; }
         .mt-2 { margin-top: 12px; }
         .w-100 { width: 100%; }
@@ -171,7 +171,7 @@
             <div class="card"><div class="card-title">🎯 单品上限说明</div><p class="text-center" style="font-size:0.75rem;">单品上限存储在 system_config 表中，无需修改 products 表结构，完全兼容现有数据库。</p></div>
         </div>
 
-        <!-- 商品模态框（包含单品上限） -->
+        <!-- 商品模态框 -->
         <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show = false"><div class="modal-container"><h3>{{ productModal.isEdit ? '编辑商品' : '新增商品' }}</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="categoryOptions"><datalist id="categoryOptions"><option v-for="cat in categoryList" :value="cat"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="form-group"><label>单次入库上限 (件/次，留空或0代表使用全局上限)</label><input type="number" v-model.number="productModal.form.inbound_limit_per_time" placeholder="例如 20" min="0"></div><div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div></div></div>
         <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible = false"><div class="modal-container"><h3>管理分类</h3><div class="input-group"><input v-model="newCategoryName" placeholder="新分类名称"><button class="btn-primary" @click="addCategory">添加</button></div><div v-for="cat in categoryList" :key="cat" style="display:flex; justify-content:space-between; padding:8px;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button></div></div>
         <div v-if="editStaffModal.show" class="modal-mask" @click.self="editStaffModal.show = false"><div class="modal-container"><h3>编辑人员</h3><input v-model="editStaffModal.name"><div class="flex-between mt-2"><button class="btn-outline" @click="editStaffModal.show=false">取消</button><button class="btn-primary" @click="updateStaff">保存</button></div></div></div>
@@ -203,8 +203,7 @@
             const submittedAttempt = ref(false);
             const isAdmin = ref(false);
             const globalInboundLimit = ref(100);
-            // 存储每个商品的自定义上限（从 system_config 加载）
-            const productLimits = ref({}); // key: productId, value: limit
+            const productLimits = ref({});
             const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
             const batchRemark = ref('');
             const batchPhotoBase64 = ref('');
@@ -215,8 +214,7 @@
             const toastMessage = ref('');
             let toastTimer = null;
             
-            // 扫码相关变量
-            let pendingBarcodeForProduct = null; // 用于扫码未找到时传递条码
+            let pendingBarcodeForProduct = null;
             
             const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0, inbound_limit_per_time: null } });
             const categoryManagerVisible = ref(false);
@@ -224,29 +222,19 @@
             const editStaffModal = ref({ show: false, id: null, name: '' });
             const newStaffName = ref('');
             
-            // 扫码相关
             const scannerModalVisible = ref(false);
             const scannerError = ref('');
             let html5QrCode = null;
             let currentScanCallback = null;
             
-            const showToast = (msg, duration=2000) => { toastMessage.value = msg; if(toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastMessage.value='', duration); };
+            const showToast = (msg, duration=2500) => { toastMessage.value = msg; if(toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastMessage.value='', duration); };
             
             const getProductStock = (pid) => { const p = products.value.find(i=>i.id === pid); return p ? p.stock : 0; };
-            // 获取商品单品上限（从 productLimits 或全局）
-            const getProductLimit = (productId) => {
-                if (!productId) return 0;
-                if (productLimits.value[productId] && productLimits.value[productId] > 0) return productLimits.value[productId];
-                return 0;
-            };
-            const getItemEffectiveLimit = (productId) => {
-                const custom = getProductLimit(productId);
-                if (custom > 0) return custom;
-                return globalInboundLimit.value;
-            };
+            const getProductLimit = (productId) => { if (!productId) return 0; return productLimits.value[productId] || 0; };
+            const getItemEffectiveLimit = (productId) => { const custom = getProductLimit(productId); if (custom > 0) return custom; return globalInboundLimit.value; };
             const updateItemLimitHint = (item) => { item.effectiveLimit = getItemEffectiveLimit(item.productId); };
             
-            // 加载单品上限配置（从 system_config）
+            // 加载单品上限
             const loadProductLimits = async () => {
                 try {
                     const { data, error } = await supaClient.from('system_config').select('key, value').like('key', 'product_limit_%');
@@ -260,22 +248,24 @@
                 } catch(e) { console.warn('加载单品上限失败', e); productLimits.value = {}; }
             };
             
-            // 保存某个商品的上限
+            // 安全保存单品上限（先删除后插入）
             const saveProductLimit = async (productId, limit) => {
                 if (!productId) return;
                 const key = `product_limit_${productId}`;
-                if (!limit || limit <= 0) {
-                    // 删除配置
+                try {
+                    // 先删除旧记录（如果存在）
                     await supaClient.from('system_config').delete().eq('key', key);
-                    delete productLimits.value[productId];
-                } else {
-                    const { error } = await supaClient.from('system_config').upsert({ key, value: String(limit) }, { onConflict: 'key' });
-                    if (error) throw error;
-                    productLimits.value[productId] = limit;
-                }
+                    if (limit && limit > 0) {
+                        // 插入新记录
+                        const { error } = await supaClient.from('system_config').insert({ key, value: String(limit) });
+                        if (error) throw error;
+                        productLimits.value[productId] = limit;
+                    } else {
+                        delete productLimits.value[productId];
+                    }
+                } catch(e) { throw new Error(`保存单品上限失败: ${e.message}`); }
             };
             
-            // 删除商品时清理上限配置
             const deleteProductLimit = async (productId) => {
                 const key = `product_limit_${productId}`;
                 await supaClient.from('system_config').delete().eq('key', key);
@@ -312,7 +302,6 @@
             
             const saveGlobalInboundLimit = async () => { if(!isAdmin.value) return; await supaClient.from('system_config').update({ value: String(globalInboundLimit.value) }).eq('key','inbound_limit'); showToast('全局上限已保存'); };
             
-            // 批量提交
             const submitBatchTransactionOptimized = async () => {
                 submittedAttempt.value = true;
                 if(photoProcessing.value) { showToast('照片处理中，请稍后'); return; }
@@ -394,48 +383,65 @@
             };
             const clearPhoto = () => { batchPhotoBase64.value = ''; batchPhotoPreview.value = ''; if(photoInput.value) photoInput.value.value = ''; };
             
-            // 商品操作（使用 productLimits 存储单品上限）
+            // 保存商品（修复版：包含单品上限的保存）
             const saveProduct = async () => {
-                if(!isAdmin.value) return;
+                if(!isAdmin.value) { showToast('请先登录管理员'); return; }
                 const f = productModal.value.form;
-                if(!f.name.trim() || !f.barcode.trim()) { showToast('名称和条码不能为空'); return; }
+                if(!f.name.trim()) { showToast('商品名称不能为空'); return; }
+                if(!f.barcode.trim()) { showToast('商品条码不能为空'); return; }
                 try {
-                    const payload = { name: f.name, barcode: f.barcode, category: f.category || '未分类' };
                     let productId = f.id;
-                    if(!productModal.value.isEdit) { 
-                        payload.stock = f.stock || 0; 
+                    if(!productModal.value.isEdit) {
+                        // 新增商品
+                        const payload = { 
+                            name: f.name.trim(), 
+                            barcode: f.barcode.trim(), 
+                            category: f.category?.trim() || '未分类',
+                            stock: f.stock || 0
+                        };
                         const { data, error } = await supaClient.from('products').insert(payload).select();
-                        if(error) throw error;
+                        if(error) throw new Error(`插入商品失败: ${error.message}`);
+                        if(!data || data.length === 0) throw new Error('插入商品后未返回数据');
                         productId = data[0].id;
-                    } else { 
-                        await supaClient.from('products').update(payload).eq('id', f.id); 
-                        productId = f.id;
-                    }
-                    // 保存单品上限
-                    if (f.inbound_limit_per_time && f.inbound_limit_per_time > 0) {
-                        await saveProductLimit(productId, f.inbound_limit_per_time);
+                        showToast('商品添加成功');
                     } else {
-                        await saveProductLimit(productId, 0); // 删除配置
+                        // 编辑商品
+                        const payload = { 
+                            name: f.name.trim(), 
+                            barcode: f.barcode.trim(), 
+                            category: f.category?.trim() || '未分类'
+                        };
+                        const { error } = await supaClient.from('products').update(payload).eq('id', f.id);
+                        if(error) throw new Error(`更新商品失败: ${error.message}`);
+                        productId = f.id;
+                        showToast('商品更新成功');
                     }
+                    // 保存单品上限（如果有值且大于0）
+                    const limitValue = f.inbound_limit_per_time && f.inbound_limit_per_time > 0 ? f.inbound_limit_per_time : null;
+                    await saveProductLimit(productId, limitValue);
+                    
                     await loadData();
-                    await loadProductLimits(); // 刷新上限
+                    await loadProductLimits(); // 重新加载上限
                     productModal.value.show = false;
-                    showToast('保存成功');
-                } catch(e) { console.error(e); showToast('保存失败: ' + e.message); }
+                } catch(e) {
+                    console.error(e);
+                    showToast('保存失败: ' + e.message, 3000);
+                }
             };
             
             const deleteProduct = async (id) => { 
-                if(confirm('删除商品同时删除所有记录和自定义上限')) { 
+                if(!confirm('删除商品会同时删除所有出入库记录和自定义上限，确定吗？')) return;
+                try {
                     await deleteProductLimit(id);
-                    await supaClient.from('products').delete().eq('id', id); 
-                    await loadData(); 
+                    await supaClient.from('products').delete().eq('id', id);
+                    await loadData();
                     await loadProductLimits();
-                    showToast('已删除'); 
-                } 
+                    showToast('已删除');
+                } catch(e) { showToast('删除失败: '+e.message); }
             };
             
             const openProductModal = (product=null, presetBarcode='') => { 
-                if(!isAdmin.value) { showToast('请先登录管理员'); return; } 
+                if(!isAdmin.value) { showToast('请先以管理员身份登录'); return; } 
                 if(product) {
                     const currentLimit = getProductLimit(product.id);
                     productModal.value = { 
@@ -463,9 +469,8 @@
             const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
             const removeBatchItem = (idx) => batchItems.value.splice(idx,1);
             const exportBackup = () => { const backup = { products: products.value, transactions: transactions.value, staffs: staffList.value, categoryList: categoryList.value, productLimits: productLimits.value }; const blob = new Blob([JSON.stringify(backup)], {type:"application/json"}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`backup_${Date.now()}.json`; a.click(); };
-            const restoreBackup = async (e) => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=async(ev)=>{ const backup=JSON.parse(ev.target.result); if(confirm("覆盖当前数据?")){ await supaClient.from('products').delete().neq('id',0); await supaClient.from('transactions').delete().neq('id',0); await supaClient.from('staffs').delete().neq('id',0); await supaClient.from('system_config').delete().like('key', 'product_limit_%'); for(let p of backup.products) await supaClient.from('products').insert(p); for(let t of backup.transactions) await supaClient.from('transactions').insert(t); if(backup.staffs) for(let s of backup.staffs) await supaClient.from('staffs').insert(s); if(backup.productLimits) { for(let [pid, limit] of Object.entries(backup.productLimits)) { await supaClient.from('system_config').upsert({ key: `product_limit_${pid}`, value: String(limit) }); } } await loadData(); await loadProductLimits(); showToast("恢复成功"); } }; reader.readAsText(file); };
+            const restoreBackup = async (e) => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=async(ev)=>{ const backup=JSON.parse(ev.target.result); if(confirm("覆盖当前数据?")){ await supaClient.from('products').delete().neq('id',0); await supaClient.from('transactions').delete().neq('id',0); await supaClient.from('staffs').delete().neq('id',0); await supaClient.from('system_config').delete().like('key', 'product_limit_%'); for(let p of backup.products) await supaClient.from('products').insert(p); for(let t of backup.transactions) await supaClient.from('transactions').insert(t); if(backup.staffs) for(let s of backup.staffs) await supaClient.from('staffs').insert(s); if(backup.productLimits) { for(let [pid, limit] of Object.entries(backup.productLimits)) { await supaClient.from('system_config').insert({ key: `product_limit_${pid}`, value: String(limit) }); } } await loadData(); await loadProductLimits(); showToast("恢复成功"); } }; reader.readAsText(file); };
             
-            // 扫码功能（修复条码自动填充）
             const startScanner = (callback) => new Promise((resolve,reject)=>{ scannerModalVisible.value=true; scannerError.value=''; currentScanCallback=callback; nextTick(()=>{ const wrapper=document.getElementById('qr-reader-wrapper'); if(!wrapper) reject(); wrapper.innerHTML=''; if(html5QrCode) html5QrCode.stop(); html5QrCode=new Html5Qrcode("qr-reader-wrapper"); html5QrCode.start({ facingMode:"environment" }, { fps:10, qrbox:{ width:260, height:260 } }, (decoded)=>{ if(currentScanCallback) currentScanCallback(decoded); closeScannerModal(); resolve(decoded); }, ()=>{}) .catch(err=>{ scannerError.value="摄像头启动失败"; reject(err); }); }); });
             const closeScannerModal = async () => { if(html5QrCode && html5QrCode.isScanning) await html5QrCode.stop(); scannerModalVisible.value=false; };
             
@@ -477,7 +482,7 @@
                     else { 
                         if(confirm(`未找到条码 "${barcode}" 的商品，是否立即创建？`)) {
                             if (!isAdmin.value) { showToast('请先以管理员身份登录'); return; }
-                            openProductModal(null, barcode); // 传递条码自动填充
+                            openProductModal(null, barcode);
                         } else showToast('未匹配商品');
                     }
                 } catch(e) { console.error(e); }
