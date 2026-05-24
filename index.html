@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - 库存上限 | 稳定版</title>
+    <title>出入库管理</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -62,7 +62,7 @@
 <div id="app">
     <div class="app-container">
         <div class="flex-between">
-            <h1><i class="fas fa-boxes"></i> 智能出入库</h1>
+            <h1><i class="fas fa-boxes"></i> 出入库管理</h1>
             <div v-if="!isAdmin" class="btn-sm" @click="showAdminLogin"><i class="fas fa-lock"></i> 管理员</div>
             <div v-else class="admin-badge"><i class="fas fa-user-shield"></i> 管理员 <span class="btn-sm" @click="logoutAdmin" style="margin-left:6px;">退出</span></div>
         </div>
@@ -182,7 +182,7 @@
                             <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'" style="margin-left:8px;">{{ t.type === 'in' ? '入库' : '出库' }}</span>
                             <span style="margin-left:8px;">数量: {{ t.quantity }}</span>
                         </div>
-                        <button v-if="isAdmin" class="delete-record-btn" @click="deleteRecord(t.id, t.product_id, t.type, t.quantity)" title="删除记录">
+                        <button v-if="isAdmin" class="delete-record-btn" @click="deleteRecord(t.id)" title="删除记录">
                             <i class="fas fa-trash-alt"></i>
                         </button>
                     </div>
@@ -446,16 +446,14 @@
                 doSubmit();
             };
             
-            const deleteRecord = async (recordId, productId, type, quantity) => {
-                if(!confirm('删除此记录会同步调整库存，确定吗？')) return;
+            // 删除记录 - 只删除记录，不调整库存
+            const deleteRecord = async (recordId) => {
+                if(!confirm('确定删除这条记录吗？删除后不会影响当前库存数量。')) return;
                 try {
-                    const { data: product } = await supaClient.from('products').select('stock').eq('id', productId).single();
-                    const stockAdjust = type === 'in' ? -quantity : quantity;
-                    const newStock = (product?.stock || 0) + stockAdjust;
-                    await supaClient.from('products').update({ stock: newStock }).eq('id', productId);
-                    await supaClient.from('transactions').delete().eq('id', recordId);
+                    const { error } = await supaClient.from('transactions').delete().eq('id', recordId);
+                    if(error) throw error;
                     await loadData();
-                    showToast('记录已删除，库存已调整');
+                    showToast('记录已删除');
                 } catch(e) { showToast('删除失败: ' + e.message); }
             };
             
@@ -473,37 +471,47 @@
             };
             const clearPhoto = () => { batchPhotoBase64.value = ''; batchPhotoPreview.value = ''; if(photoInput.value) photoInput.value.value = ''; };
             
+            // 保存商品 - 立刻关闭弹窗，后台静默保存
             const saveProduct = async () => {
                 if(!isAdmin.value) return;
                 const f = productModal.value.form;
                 if(!f.name.trim() || !f.barcode.trim()) { showToast('名称和条码不能为空'); return; }
-                try {
-                    const payload = { 
-                        name: f.name, 
-                        barcode: f.barcode, 
-                        category: f.category || '未分类'
-                    };
-                    if (f.stock_limit && f.stock_limit > 0) {
-                        payload.stock_limit = f.stock_limit;
-                    }
-                    if(!productModal.value.isEdit) { 
-                        payload.stock = f.stock || 0; 
-                        const { error } = await supaClient.from('products').insert(payload);
-                        if(error) {
-                            if(error.code === '23505') { showToast('条码已存在，请使用不同的条码'); return; }
-                            throw error;
+                
+                // 立即关闭弹窗
+                productModal.value.show = false;
+                showToast('正在保存...');
+                
+                // 后台保存
+                const doSave = async () => {
+                    try {
+                        const payload = { 
+                            name: f.name, 
+                            barcode: f.barcode, 
+                            category: f.category || '未分类'
+                        };
+                        if (f.stock_limit && f.stock_limit > 0) {
+                            payload.stock_limit = f.stock_limit;
                         }
-                    } else { 
-                        const { error } = await supaClient.from('products').update(payload).eq('id', f.id);
-                        if(error) throw error;
+                        if(!productModal.value.isEdit) { 
+                            payload.stock = f.stock || 0; 
+                            const { error } = await supaClient.from('products').insert(payload);
+                            if(error) {
+                                if(error.code === '23505') { showToast('条码已存在，请使用不同的条码'); return; }
+                                throw error;
+                            }
+                        } else { 
+                            const { error } = await supaClient.from('products').update(payload).eq('id', f.id);
+                            if(error) throw error;
+                        }
+                        await loadData();
+                        showToast('保存成功');
+                    } catch(e) { 
+                        console.error(e);
+                        showToast('保存失败: ' + (e.message || '未知错误')); 
                     }
-                    await loadData();
-                    productModal.value.show = false;
-                    showToast('保存成功');
-                } catch(e) { 
-                    console.error(e);
-                    showToast('保存失败: ' + (e.message || '未知错误')); 
-                }
+                };
+                
+                doSave();
             };
             
             const deleteProduct = async (id) => { 
