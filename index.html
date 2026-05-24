@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - 总库存上限控制 | 稳定版</title>
+    <title>智能出入库 - 总库存上限 | 极速版</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -31,7 +31,9 @@
         .product-item { background: #fafcff; border-radius: 18px; padding: 12px; margin-bottom: 8px; border: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .stock-badge { background: #e6f7f5; padding: 4px 10px; border-radius: 40px; font-weight: 600; font-size: 0.8rem; }
         .stock-warning { background: #fee2e2; color: #b91c1c; }
-        .record-item { font-size: 0.8rem; border-bottom: 1px solid #f0f2f5; padding: 10px 0; }
+        .record-item { font-size: 0.8rem; border-bottom: 1px solid #f0f2f5; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .record-content { flex: 1; }
+        .record-actions { display: flex; gap: 8px; }
         .modal-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal-container { background: white; width: 90%; max-width: 450px; border-radius: 32px; padding: 20px; max-height: 85vh; overflow-y: auto; }
         .batch-row { background: #f8fafc; border-radius: 20px; padding: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; }
@@ -44,12 +46,12 @@
         .badge-in { background: #dff9e6; color: #2b7e3a; padding: 2px 8px; border-radius: 40px; }
         .badge-out { background: #ffe6e5; color: #bc3f33; padding: 2px 8px; border-radius: 40px; }
         .admin-badge { background: #eab308; color: #0f172a; padding: 2px 8px; border-radius: 40px; font-size: 0.7rem; }
-        .required-star { color: #dc2626; margin-left: 4px; }
         .limit-warning { background: #fef3c7; border-left: 4px solid #eab308; padding: 8px 12px; border-radius: 12px; margin-bottom: 16px; font-size: 0.75rem; }
         .product-limit-badge { font-size: 0.7rem; background: #eef2ff; border-radius: 20px; padding: 2px 8px; color:#1e40af; display: inline-block; margin-top: 4px; }
-        .photo-loading { background: #e2e8f0; border-radius: 20px; padding: 6px 12px; font-size: 0.7rem; }
         .toast-msg { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #0f172a; color: white; padding: 8px 20px; border-radius: 40px; font-size: 0.8rem; z-index: 3000; white-space: nowrap; }
         .retry-btn { background: #14b8a6; border: none; padding: 10px 20px; border-radius: 40px; color: white; font-weight: bold; margin-top: 10px; cursor: pointer; }
+        .delete-record-btn { background: #fee2e2; border: none; padding: 4px 8px; border-radius: 20px; color: #b91c1c; cursor: pointer; font-size: 0.7rem; }
+        .delete-record-btn:hover { background: #fecaca; }
     </style>
 </head>
 <body>
@@ -101,12 +103,12 @@
             <div v-if="!isAdmin" class="text-center mt-2" style="font-size:0.7rem; color:#94a3b8;"><i class="fas fa-lock"></i> 商品管理需管理员权限</div>
         </div>
 
-        <!-- 批量出入库页面 -->
+        <!-- 批量出入库页面（照片可选） -->
         <div v-show="activeTab === 'batch'">
             <div class="card">
                 <div class="card-title">📝 批量出入库 <button class="btn-sm" @click="openScannerForBatchAdd"><i class="fas fa-camera"></i> 扫码添加商品</button></div>
                 <div class="limit-warning">
-                    <i class="fas fa-info-circle"></i> 入库时将校验：<strong>当前库存 + 入库数量 ≤ 商品库存上限</strong>。若未设置上限则不限制。
+                    <i class="fas fa-info-circle"></i> 入库时将校验：<strong>当前库存 + 入库数量 ≤ 商品库存上限</strong>。照片为可选凭证。
                 </div>
                 <div v-for="(item, idx) in batchItems" :key="idx" class="batch-row">
                     <div class="flex-between"><span>商品 {{ idx+1 }}</span><button class="btn-sm btn-danger" @click="removeBatchItem(idx)" v-if="batchItems.length>1"><i class="fas fa-trash"></i> 删除</button></div>
@@ -135,12 +137,11 @@
                     <textarea v-model="batchRemark" rows="2" placeholder="可选"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>照片凭证 <span class="required-star">*</span></label>
+                    <label>照片凭证（可选）</label>
                     <input type="file" accept="image/*" @change="onPhotoSelected" ref="photoInput">
                     <div v-if="photoProcessing" class="photo-loading mt-2"><i class="fas fa-spinner fa-pulse"></i> 图片处理中...</div>
                     <div v-if="batchPhotoPreview"><img :src="batchPhotoPreview" style="max-width:80px; border-radius:12px; margin-top:8px;"></div>
                     <button class="btn-sm" @click="clearPhoto" v-if="batchPhotoPreview">清除照片</button>
-                    <div v-if="!batchPhotoBase64 && submittedAttempt && !photoProcessing" class="error-message" style="font-size:0.7rem; margin-top:4px;">请拍摄或上传照片（凭证必须）</div>
                 </div>
                 <button class="btn-primary w-100" @click="submitBatchTransaction" :disabled="submitting">
                     <i v-if="submitting" class="fas fa-spinner fa-pulse"></i> {{ submitting ? '提交中...' : '确认批量出入库' }}
@@ -148,15 +149,20 @@
             </div>
         </div>
 
-        <!-- 记录页面 -->
+        <!-- 记录页面（带删除按钮） -->
         <div v-show="activeTab === 'records'">
             <div class="card-title">📋 历史流水 <span style="font-size:0.7rem;">(最新优先)</span></div>
             <div v-if="sortedTransactions.length === 0" class="text-center">暂无记录</div>
             <div v-for="t in sortedTransactions" :key="t.id" class="record-item">
-                <div class="flex-between"><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'">{{ t.type === 'in' ? '入库' : '出库' }}</span><span>数量: {{ t.quantity }}</span></div>
-                <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span>经手人: {{ t.staff_name || '未知' }}</span></div>
-                <div class="flex-between"><span v-if="t.remark_text">📝 {{ t.remark_text }}</span><span v-if="t.photo_data"><i class="fas fa-camera"></i> 有照片</span></div>
-                <div v-if="t.photo_data"><img :src="t.photo_data" style="max-width:60px; border-radius:8px;" @click="showFullImage(t.photo_data)"></div>
+                <div class="record-content">
+                    <div class="flex-between"><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type === 'in' ? 'badge-in' : 'badge-out'">{{ t.type === 'in' ? '入库' : '出库' }}</span><span>数量: {{ t.quantity }}</span></div>
+                    <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span>经手人: {{ t.staff_name || '未知' }}</span></div>
+                    <div v-if="t.remark_text">📝 {{ t.remark_text }}</div>
+                    <div v-if="t.photo_data"><i class="fas fa-camera"></i> 有照片 <span class="btn-sm" @click="showFullImage(t.photo_data)">查看</span></div>
+                </div>
+                <div class="record-actions" v-if="isAdmin">
+                    <button class="delete-record-btn" @click="deleteRecord(t.id, t.product_id, t.type, t.quantity)" title="删除记录并恢复库存"><i class="fas fa-trash-alt"></i> 删除</button>
+                </div>
             </div>
         </div>
 
@@ -169,7 +175,7 @@
 
         <!-- 设置页面 -->
         <div v-show="activeTab === 'settings'">
-            <div class="card"><div class="card-title">⚙️ 说明</div><p class="text-center" style="font-size:0.75rem;">每个商品可单独设置<strong>总库存上限</strong>（最大可存储数量）。入库时会校验“当前库存+入库量 ≤ 上限”。不设置上限则不限制。</p></div>
+            <div class="card"><div class="card-title">⚙️ 说明</div><p class="text-center" style="font-size:0.75rem;">每个商品可单独设置<strong>总库存上限</strong>（最大可存储数量）。入库时会校验“当前库存+入库量 ≤ 上限”。照片为可选凭证。</p></div>
             <div class="card"><div class="card-title">💾 备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup">备份数据</button><label class="btn-primary" style="background:#334155;">恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
         </div>
 
@@ -208,7 +214,6 @@
             const loadingInitial = ref(true);
             const loadError = ref('');
             const submitting = ref(false);
-            const submittedAttempt = ref(false);
             const isAdmin = ref(false);
             const productMaxStock = ref({});
             const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
@@ -232,7 +237,7 @@
             let html5QrCode = null;
             let currentScanCallback = null;
             
-            const showToast = (msg, duration=2500) => { toastMessage.value = msg; if(toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastMessage.value='', duration); };
+            const showToast = (msg, duration=2000) => { toastMessage.value = msg; if(toastTimer) clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastMessage.value='', duration); };
             
             const getProductStock = (pid) => { const p = products.value.find(i=>i.id === pid); return p ? p.stock : 0; };
             const getProductMaxStock = (productId) => { if (!productId) return 0; return productMaxStock.value[productId] || 0; };
@@ -255,9 +260,7 @@
                         if (!isNaN(productId)) limits[productId] = parseInt(item.value) || 0;
                     });
                     productMaxStock.value = limits;
-                } catch(e) { 
-                    console.warn('加载库存上限失败', e);
-                }
+                } catch(e) { console.warn(e); }
             };
             
             const saveProductMaxStock = async (productId, limit) => {
@@ -266,13 +269,12 @@
                 try {
                     await supaClient.from('system_config').delete().eq('key', key);
                     if (limit && limit > 0) {
-                        const { error } = await supaClient.from('system_config').insert({ key, value: String(limit) });
-                        if (error) throw error;
+                        await supaClient.from('system_config').insert({ key, value: String(limit) });
                         productMaxStock.value[productId] = limit;
                     } else {
                         delete productMaxStock.value[productId];
                     }
-                } catch(e) { throw new Error(`保存库存上限失败: ${e.message}`); }
+                } catch(e) { throw new Error(`保存上限失败: ${e.message}`); }
             };
             
             const deleteProductMaxStock = async (productId) => {
@@ -288,9 +290,9 @@
                         supaClient.from('transactions').select('*').order('timestamp', { ascending: false }),
                         supaClient.from('staffs').select('*').order('id')
                     ]);
-                    if(prods.error) throw new Error(`products表错误: ${prods.error.message}`);
-                    if(trans.error) throw new Error(`transactions表错误: ${trans.error.message}`);
-                    if(staffs.error) throw new Error(`staffs表错误: ${staffs.error.message}`);
+                    if(prods.error) throw prods.error;
+                    if(trans.error) throw trans.error;
+                    if(staffs.error) throw staffs.error;
                     products.value = prods.data || [];
                     transactions.value = trans.data || [];
                     staffList.value = staffs.data || [];
@@ -298,25 +300,18 @@
                     const stored = localStorage.getItem('custom_categories');
                     if(stored) JSON.parse(stored).forEach(c=>cats.add(c));
                     categoryList.value = Array.from(cats).sort();
-                } catch(e) { 
-                    console.error(e);
-                    throw e;
-                }
+                } catch(e) { throw e; }
             };
             
-            const sortedTransactions = computed(() => {
-                return [...transactions.value].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            });
+            const sortedTransactions = computed(() => transactions.value);
             
-            // 批量出入库提交（修复状态重置）
+            // 批量出入库（并行提交，大幅提速）
             const submitBatchTransaction = async () => {
-                submittedAttempt.value = true;
-                if(photoProcessing.value) { showToast('照片处理中，请稍后'); return; }
-                if(!batchPhotoBase64.value) { showToast('请拍摄或上传照片凭证'); return; }
                 if(!selectedStaff.value) { showToast('请选择经手人'); return; }
                 if(batchItems.value.length === 0) { showToast('至少添加一行商品'); return; }
                 
                 const timestamp = Date.now();
+                // 前端校验
                 for(let item of batchItems.value) {
                     if(!item.productId) { showToast('请选择所有商品'); return; }
                     if(item.quantity <= 0) { showToast('数量必须大于0'); return; }
@@ -334,51 +329,72 @@
                 }
                 
                 submitting.value = true;
-                let successCount = 0;
-                let failError = null;
+                const updatePromises = [];
+                const insertPromises = [];
+                const localUpdates = [];
                 
-                for(let i=0; i<batchItems.value.length; i++) {
-                    const item = batchItems.value[i];
+                // 准备所有更新和插入操作
+                for(let item of batchItems.value) {
                     const p = products.value.find(p=>p.id === item.productId);
                     const newStock = item.type === 'in' ? p.stock + item.quantity : p.stock - item.quantity;
-                    try {
-                        const { error: updateErr } = await supaClient.from('products').update({ stock: newStock }).eq('id', item.productId);
-                        if(updateErr) throw new Error(`更新库存失败: ${updateErr.message}`);
-                        const { error: insertErr } = await supaClient.from('transactions').insert({
-                            product_id: item.productId,
-                            type: item.type,
-                            quantity: item.quantity,
+                    // 库存更新
+                    updatePromises.push(supaClient.from('products').update({ stock: newStock }).eq('id', item.productId));
+                    // 记录插入
+                    insertPromises.push(supaClient.from('transactions').insert({
+                        product_id: item.productId,
+                        type: item.type,
+                        quantity: item.quantity,
+                        timestamp: timestamp,
+                        remark_text: batchRemark.value || null,
+                        photo_data: batchPhotoBase64.value || null,
+                        staff_name: selectedStaff.value
+                    }));
+                    // 本地记录更新
+                    localUpdates.push({ productId: item.productId, newStock, item });
+                }
+                
+                try {
+                    // 并行执行所有更新和插入
+                    const updateResults = await Promise.all(updatePromises);
+                    const insertResults = await Promise.all(insertPromises);
+                    
+                    // 检查是否有错误
+                    const updateErrors = updateResults.filter(r => r.error);
+                    const insertErrors = insertResults.filter(r => r.error);
+                    if(updateErrors.length > 0) throw new Error(updateErrors[0].error.message);
+                    if(insertErrors.length > 0) throw new Error(insertErrors[0].error.message);
+                    
+                    // 更新本地数据（乐观更新）
+                    for(let u of localUpdates) {
+                        const prod = products.value.find(p => p.id === u.productId);
+                        if(prod) prod.stock = u.newStock;
+                        // 创建新记录对象并插入到 transactions 开头
+                        const newRecord = {
+                            id: Date.now() + Math.random(), // 临时id，实际会被订阅更新覆盖
+                            product_id: u.item.productId,
+                            type: u.item.type,
+                            quantity: u.item.quantity,
                             timestamp: timestamp,
                             remark_text: batchRemark.value || null,
-                            photo_data: batchPhotoBase64.value,
+                            photo_data: batchPhotoBase64.value || null,
                             staff_name: selectedStaff.value
-                        });
-                        if(insertErr) throw new Error(`记录保存失败: ${insertErr.message}`);
-                        successCount++;
-                    } catch(e) { failError = e; break; }
-                }
-                
-                if(failError) {
-                    showToast(`提交失败: ${failError.message}`, 3000);
-                    if(successCount>0) showToast(`部分成功 ${successCount}/${batchItems.value.length}，请检查数据`, 4000);
+                        };
+                        transactions.value.unshift(newRecord);
+                    }
+                    
+                    // 重置表单
+                    batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
+                    batchRemark.value = '';
+                    batchPhotoBase64.value = '';
+                    batchPhotoPreview.value = '';
+                    if(photoInput.value) photoInput.value.value = '';
+                    selectedStaff.value = null;
+                    showToast(`✅ 批量出入库成功 (${localUpdates.length} 项)`, 2000);
+                } catch(e) {
+                    showToast(`提交失败: ${e.message}`, 3000);
+                } finally {
                     submitting.value = false;
-                    return;
                 }
-                
-                // 刷新数据
-                await loadData();
-                await loadProductMaxStocks();
-                
-                // 重置表单（关键：清除所有状态）
-                batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
-                batchRemark.value = '';
-                batchPhotoBase64.value = '';
-                batchPhotoPreview.value = '';
-                if(photoInput.value) photoInput.value.value = '';
-                selectedStaff.value = null;
-                submittedAttempt.value = false;
-                submitting.value = false;
-                showToast(`✅ 批量出入库成功 (${successCount} 项)`, 2000);
             };
             
             const onPhotoSelected = (e) => {
@@ -390,7 +406,6 @@
                     batchPhotoBase64.value = ev.target.result;
                     batchPhotoPreview.value = ev.target.result;
                     photoProcessing.value = false;
-                    submittedAttempt.value = false;  // 清除错误提示
                     showToast('照片已加载', 1000);
                 };
                 reader.onerror = () => { showToast('照片读取失败'); photoProcessing.value = false; };
@@ -400,20 +415,14 @@
                 batchPhotoBase64.value = ''; 
                 batchPhotoPreview.value = ''; 
                 if(photoInput.value) photoInput.value.value = '';
-                submittedAttempt.value = false;
             };
             
-            // 保存商品（修复成功和失败逻辑）
+            // 保存商品（优化：本地更新 + 异步同步）
             const saveProduct = async () => {
                 if(!isAdmin.value) { showToast('请先登录管理员'); return; }
                 const f = productModal.value.form;
                 if(!f.name.trim()) { showToast('商品名称不能为空'); return; }
                 if(!f.barcode.trim()) { showToast('商品条码不能为空'); return; }
-                
-                // 禁用保存按钮防止重复提交（可选）
-                let saving = false;
-                if(saving) return;
-                saving = true;
                 
                 try {
                     let productId = f.id;
@@ -425,9 +434,14 @@
                             stock: f.stock || 0
                         };
                         const { data, error } = await supaClient.from('products').insert(payload).select();
-                        if(error) throw new Error(`插入商品失败: ${error.message}`);
-                        if(!data || data.length === 0) throw new Error('插入商品后未返回数据');
+                        if(error) throw error;
                         productId = data[0].id;
+                        // 本地添加
+                        const newProduct = { ...payload, id: productId };
+                        products.value.push(newProduct);
+                        // 排序
+                        products.value.sort((a,b) => a.id - b.id);
+                        showToast('商品添加成功');
                     } else {
                         const payload = { 
                             name: f.name.trim(), 
@@ -435,26 +449,51 @@
                             category: f.category?.trim() || '未分类'
                         };
                         const { error } = await supaClient.from('products').update(payload).eq('id', f.id);
-                        if(error) throw new Error(`更新商品失败: ${error.message}`);
-                        productId = f.id;
+                        if(error) throw error;
+                        // 本地更新
+                        const prod = products.value.find(p => p.id === f.id);
+                        if(prod) {
+                            prod.name = payload.name;
+                            prod.barcode = payload.barcode;
+                            prod.category = payload.category;
+                        }
+                        showToast('商品更新成功');
                     }
                     
-                    // 保存库存上限
                     const limitValue = f.max_stock_limit && f.max_stock_limit > 0 ? f.max_stock_limit : null;
                     await saveProductMaxStock(productId, limitValue);
                     
-                    // 重新加载数据
-                    await loadData();
-                    await loadProductMaxStocks();
-                    
-                    // 关闭模态框并显示成功消息
                     productModal.value.show = false;
-                    showToast(productModal.value.isEdit ? '商品更新成功' : '商品添加成功', 2000);
                 } catch(e) {
-                    console.error(e);
                     showToast('保存失败: ' + e.message, 3000);
-                } finally {
-                    saving = false;
+                }
+            };
+            
+            // 删除记录并恢复库存
+            const deleteRecord = async (recordId, productId, type, quantity) => {
+                if(!confirm('删除此记录将恢复对应的库存数量，确定吗？')) return;
+                try {
+                    // 先删除记录
+                    const { error: delError } = await supaClient.from('transactions').delete().eq('id', recordId);
+                    if(delError) throw delError;
+                    
+                    // 恢复库存：入库删除则减少库存，出库删除则增加库存
+                    const stockDelta = type === 'in' ? -quantity : quantity;
+                    const product = products.value.find(p => p.id === productId);
+                    if(product) {
+                        const newStock = product.stock + stockDelta;
+                        const { error: updateError } = await supaClient.from('products').update({ stock: newStock }).eq('id', productId);
+                        if(updateError) throw updateError;
+                        product.stock = newStock;
+                    }
+                    
+                    // 从本地 transactions 中移除
+                    const index = transactions.value.findIndex(t => t.id === recordId);
+                    if(index !== -1) transactions.value.splice(index, 1);
+                    
+                    showToast('记录已删除，库存已恢复');
+                } catch(e) {
+                    showToast('删除失败: ' + e.message, 3000);
                 }
             };
             
@@ -463,8 +502,9 @@
                 try {
                     await deleteProductMaxStock(id);
                     await supaClient.from('products').delete().eq('id', id);
-                    await loadData();
-                    await loadProductMaxStocks();
+                    await supaClient.from('transactions').delete().eq('product_id', id);
+                    products.value = products.value.filter(p => p.id !== id);
+                    transactions.value = transactions.value.filter(t => t.product_id !== id);
                     showToast('已删除');
                 } catch(e) { showToast('删除失败: '+e.message); }
             };
@@ -490,10 +530,10 @@
                 }
             };
             
-            const addStaff = async () => { if(!isAdmin.value) return; const name = newStaffName.value.trim(); if(!name) return; await supaClient.from('staffs').insert({ name }); await loadData(); newStaffName.value=''; showToast('添加成功'); };
+            const addStaff = async () => { if(!isAdmin.value) return; const name = newStaffName.value.trim(); if(!name) return; const { data, error } = await supaClient.from('staffs').insert({ name }).select(); if(!error && data) { staffList.value.push(data[0]); } newStaffName.value=''; showToast('添加成功'); };
             const editStaff = (s) => { editStaffModal.value = { show:true, id:s.id, name:s.name }; };
-            const updateStaff = async () => { const name = editStaffModal.value.name.trim(); if(!name) return; await supaClient.from('staffs').update({ name }).eq('id', editStaffModal.value.id); await loadData(); editStaffModal.value.show=false; showToast('更新成功'); };
-            const deleteStaff = async (id) => { if(confirm('删除人员')) { await supaClient.from('staffs').delete().eq('id', id); await loadData(); } };
+            const updateStaff = async () => { const name = editStaffModal.value.name.trim(); if(!name) return; await supaClient.from('staffs').update({ name }).eq('id', editStaffModal.value.id); const staff = staffList.value.find(s => s.id === editStaffModal.value.id); if(staff) staff.name = name; editStaffModal.value.show=false; showToast('更新成功'); };
+            const deleteStaff = async (id) => { if(confirm('删除人员')) { await supaClient.from('staffs').delete().eq('id', id); staffList.value = staffList.value.filter(s => s.id !== id); } };
             
             const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
             const removeBatchItem = (idx) => batchItems.value.splice(idx,1);
@@ -538,6 +578,7 @@
                 reader.readAsText(file); 
             };
             
+            // 扫码（条码自动填充）
             const startScanner = (callback) => new Promise((resolve,reject)=>{ 
                 scannerModalVisible.value=true; 
                 scannerError.value=''; 
@@ -601,24 +642,20 @@
             
             const initializeApp = async () => {
                 try {
-                    await loadData();
-                    await loadProductMaxStocks();
+                    await Promise.all([loadData(), loadProductMaxStocks()]);
                     loadingInitial.value = false;
                 } catch(err) {
-                    console.error('初始化失败:', err);
+                    console.error(err);
                     loadError.value = err.message || '网络错误，请检查网络后重试';
                     loadingInitial.value = false;
                 }
             };
             
-            onMounted(() => {
-                initializeApp();
-            });
-            
+            onMounted(() => { initializeApp(); });
             onUnmounted(() => { if(html5QrCode && html5QrCode.isScanning) html5QrCode.stop(); });
             
             return {
-                activeTab, products, transactions, staffList, categoryList, selectedCategory, loadingInitial, loadError, submitting, submittedAttempt,
+                activeTab, products, transactions, staffList, categoryList, selectedCategory, loadingInitial, loadError, submitting,
                 batchItems, batchRemark, batchPhotoPreview, selectedStaff, photoProcessing, photoInput,
                 filteredProducts, sortedTransactions, formatDate, getProductName, showFullImage, 
                 getProductStock, getProductMaxStock, exceedsMaxStock, updateItemLimitHint,
@@ -626,7 +663,7 @@
                 addBatchItem, removeBatchItem, submitBatchTransaction, onPhotoSelected, clearPhoto,
                 openCategoryManager, addCategory, removeCategory, newCategoryName, 
                 addStaff, editStaff, updateStaff, deleteStaff, newStaffName, editStaffModal,
-                exportBackup, restoreBackup,
+                exportBackup, restoreBackup, deleteRecord,
                 openScannerForStockFind, openScannerForBatchAdd, scannerModalVisible, scannerError, closeScannerModal,
                 productModal, categoryManagerVisible, toastMessage, retryLoad
             };
