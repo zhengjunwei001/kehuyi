@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - 压缩上传·管理员可删记录</title>
+    <title>智能出入库 - 扫码新增·分类修复</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -47,6 +47,9 @@
         .badge-out{background:#ffe6e5;color:#bc3f33;padding:2px 8px;border-radius:30px}
         .status-bar{font-size:0.7rem;color:#64748b;text-align:center;margin-top:8px}
         .photo-thumb{max-width:50px;border-radius:6px;margin-top:4px;cursor:pointer}
+        .input-with-btn{display:flex;gap:6px;align-items:center}
+        .input-with-btn input{flex:1}
+        .input-with-btn button{white-space:nowrap}
     </style>
 </head>
 <body>
@@ -93,7 +96,7 @@
             </div>
         </div>
 
-        <!-- 批量出入库（带图片压缩） -->
+        <!-- 批量出入库 -->
         <div v-show="activeTab==='batch'">
             <div class="card">
                 <div class="card-title">📝 批量出入库 <button class="btn-sm" @click="openScannerForBatchAdd"><i class="fas fa-camera"></i> 扫码添加</button></div>
@@ -126,7 +129,7 @@
             </div>
         </div>
 
-        <!-- 记录列表（管理员可删除） -->
+        <!-- 记录列表 -->
         <div v-show="activeTab==='records'">
             <div class="card-title">📋 历史流水 <span style="font-size:0.7rem;">(最新在上)</span></div>
             <div v-if="transactions.length===0" class="text-center">暂无记录</div>
@@ -151,14 +154,51 @@
             <div v-for="s in staffList" :key="s.id" class="flex-between" style="padding:8px 0;"><span>{{ s.name }}</span><div><button class="btn-sm" @click="editStaff(s)">编辑</button><button class="btn-sm btn-danger" @click="deleteStaff(s.id)">删除</button></div></div></template></div>
         </div>
 
-        <!-- 设置（移除迁移和性能说明） -->
+        <!-- 设置 -->
         <div v-show="activeTab==='settings'">
             <div class="card"><div class="card-title">⚙️ 系统配置</div><div class="form-group"><label>全局入库上限（件/次）</label><input type="number" v-model.number="globalInboundLimit" :disabled="!isAdmin"><button v-if="isAdmin" class="btn-primary" @click="saveGlobalLimit">保存</button></div></div>
             <div class="card"><div class="card-title">💾 备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup">备份数据</button><label class="btn-primary" style="background:#334155;">恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
         </div>
 
-        <!-- 模态框 -->
-        <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show=false"><div class="modal-container"><h3>{{ productModal.isEdit?'编辑':'新增' }}商品</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="catOpts"><datalist id="catOpts"><option v-for="c in categoryList" :value="c"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="form-group"><label>单次入库上限 (0或留空=使用全局)</label><input type="number" v-model.number="productModal.form.inbound_limit_per_time" placeholder="例如 20"></div><div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div></div></div>
+        <!-- 商品模态框（修复：条码扫码+分类下拉） -->
+        <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show=false">
+            <div class="modal-container">
+                <h3>{{ productModal.isEdit?'编辑':'新增' }}商品</h3>
+                <div class="form-group">
+                    <label>名称 <span class="required-star">*</span></label>
+                    <input v-model="productModal.form.name" placeholder="商品名称">
+                </div>
+                <div class="form-group">
+                    <label>条码 <span class="required-star">*</span></label>
+                    <div class="input-with-btn">
+                        <input v-model="productModal.form.barcode" placeholder="扫描或输入条码">
+                        <button class="btn-sm" @click="scanBarcodeForProduct"><i class="fas fa-camera"></i> 扫码</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <select v-model="productModal.form.category">
+                        <option value="">未分类</option>
+                        <option v-for="cat in categoryList" :value="cat">{{ cat }}</option>
+                        <option value="__new__">+ 新建分类</option>
+                    </select>
+                    <input v-if="productModal.form.category === '__new__'" v-model="newCategoryTemp" placeholder="输入新分类名称" class="mt-2" style="margin-top:6px;">
+                </div>
+                <div v-if="!productModal.isEdit" class="form-group">
+                    <label>初始库存</label>
+                    <input type="number" v-model.number="productModal.form.stock" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>单次入库上限 (0或留空=使用全局)</label>
+                    <input type="number" v-model.number="productModal.form.inbound_limit_per_time" placeholder="例如 20">
+                </div>
+                <div class="flex-between">
+                    <button class="btn-outline" @click="productModal.show=false">取消</button>
+                    <button class="btn-primary" @click="saveProduct">保存</button>
+                </div>
+            </div>
+        </div>
+
         <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible=false"><div class="modal-container"><h3>管理分类</h3><div class="flex-between"><input v-model="newCategoryName" placeholder="新分类"><button class="btn-primary" @click="addCategory">添加</button></div><div v-for="cat in categoryList" :key="cat" class="flex-between" style="padding:6px 0;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button></div></div>
         <div v-if="editStaffModal.show" class="modal-mask" @click.self="editStaffModal.show=false"><div class="modal-container"><h3>编辑人员</h3><input v-model="editStaffModal.name"><div class="flex-between mt-2"><button class="btn-outline" @click="editStaffModal.show=false">取消</button><button class="btn-primary" @click="updateStaff">保存</button></div></div></div>
     </div>
@@ -204,6 +244,7 @@
                 const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0, inbound_limit_per_time: null } });
                 const categoryManagerVisible = ref(false);
                 const newCategoryName = ref('');
+                const newCategoryTemp = ref(''); // 临时新分类
                 const editStaffModal = ref({ show: false, id: null, name: '' });
                 const newStaffName = ref('');
 
@@ -236,7 +277,7 @@
                     return globalInboundLimit.value;
                 };
 
-                // 图片压缩函数 (宽度限制800，质量0.7)
+                // 图片压缩
                 const compressImage = (file) => {
                     return new Promise((resolve, reject) => {
                         const reader = new FileReader();
@@ -323,7 +364,7 @@
                     showToast('全局上限已保存');
                 };
 
-                // 上传图片到 Storage (先压缩)
+                // 上传图片
                 const uploadPhoto = async (file) => {
                     if(!file) return null;
                     const compressed = await compressImage(file);
@@ -335,7 +376,7 @@
                     return publicUrlData.publicUrl;
                 };
 
-                // 批量提交（先压缩再上传）
+                // 批量提交
                 const submitBatch = async () => {
                     if(!batchPhotoFile.value) { showToast('请拍摄或上传照片凭证'); return; }
                     if(!selectedStaff.value) { showToast('请选择经手人'); return; }
@@ -394,7 +435,6 @@
                         if(insertResults.some(r => r.error)) throw new Error('记录插入失败');
 
                         await silentRefresh();
-                        // 重置表单
                         batchItems.value = [{ productId: null, type: 'in', quantity: 1 }];
                         batchRemark.value = '';
                         batchPhotoFile.value = null;
@@ -412,7 +452,6 @@
                 const onPhotoSelected = (e) => {
                     const file = e.target.files[0];
                     if(!file) return;
-                    // 显示原图预览（压缩前预览）
                     const reader = new FileReader();
                     reader.onload = (ev) => { batchPhotoPreview.value = ev.target.result; };
                     reader.readAsDataURL(file);
@@ -424,7 +463,7 @@
                     if(photoInput.value) photoInput.value.value = '';
                 };
 
-                // 删除单条记录
+                // 删除记录
                 const deleteRecord = async (recordId) => {
                     if(!isAdmin.value) { showToast('无权限'); return; }
                     if(!confirm('确定删除这条记录吗？此操作不可恢复。')) return;
@@ -438,28 +477,53 @@
                     }
                 };
 
-                // 商品 CRUD
+                // 保存商品（修复：处理新建分类）
                 const saveProduct = async () => {
-                    if(!isAdmin.value) return;
+                    if(!isAdmin.value) { showToast('请先登录管理员'); return; }
                     const f = productModal.value.form;
-                    if(!f.name.trim() || !f.barcode.trim()) { showToast('名称和条码不能为空'); return; }
+                    if(!f.name.trim()) { showToast('商品名称不能为空'); return; }
+                    if(!f.barcode.trim()) { showToast('条码不能为空'); return; }
+                    
+                    let finalCategory = f.category;
+                    if (f.category === '__new__') {
+                        if (!newCategoryTemp.value.trim()) {
+                            showToast('请输入新分类名称');
+                            return;
+                        }
+                        finalCategory = newCategoryTemp.value.trim();
+                        // 添加到分类列表
+                        if (!categoryList.value.includes(finalCategory)) {
+                            categoryList.value.push(finalCategory);
+                            localStorage.setItem('custom_cats', JSON.stringify(categoryList.value));
+                        }
+                    }
+                    
                     const payload = {
                         name: f.name,
                         barcode: f.barcode,
-                        category: f.category || '未分类',
+                        category: finalCategory || '未分类',
                         inbound_limit_per_time: f.inbound_limit_per_time || null
                     };
                     try {
                         if(!productModal.value.isEdit) {
                             payload.stock = f.stock || 0;
-                            await supabase.from('products').insert(payload);
+                            const { error } = await supabase.from('products').insert(payload);
+                            if(error) throw error;
                         } else {
-                            await supabase.from('products').update(payload).eq('id', f.id);
+                            const { error } = await supabase.from('products').update(payload).eq('id', f.id);
+                            if(error) throw error;
                         }
-                        await silentRefresh();
+                        await silentRefresh(); // 刷新数据
                         productModal.value.show = false;
+                        // 重置临时分类
+                        newCategoryTemp.value = '';
                         showToast('保存成功');
-                    } catch(e) { showToast('保存失败'); }
+                        // 切换到库存标签页以显示新商品
+                        activeTab.value = 'stock';
+                    } catch(e) {
+                        console.error(e);
+                        showToast('保存失败: ' + e.message);
+                    }
                 };
 
                 const deleteProduct = async (id) => {
@@ -484,6 +548,17 @@
                             isEdit: false,
                             form: { id: null, name: '', barcode: '', category: '', stock: 0, inbound_limit_per_time: null }
                         };
+                    }
+                };
+
+                // 为新增商品提供扫码填充条码
+                const scanBarcodeForProduct = async () => {
+                    try {
+                        const barcode = await startScanner();
+                        productModal.value.form.barcode = barcode;
+                        showToast('条码已填入');
+                    } catch(e) {
+                        showToast('扫码失败');
                     }
                 };
 
@@ -560,7 +635,7 @@
                     e.target.value = '';
                 };
 
-                // 扫码逻辑
+                // 扫码通用逻辑
                 const startScanner = (callback) => {
                     return new Promise((resolve, reject) => {
                         scannerVisible.value = true;
@@ -683,14 +758,15 @@
                 return {
                     activeTab, products, transactions, staffList, categoryList, selectedCategory, submitting,
                     batchItems, batchRemark, batchPhotoPreview, selectedStaff, globalInboundLimit, photoInput, networkReady,
-                    photoProcessing,
+                    photoProcessing, newCategoryTemp,
                     filteredProducts, formatDate, getProductName, getItemLimit,
                     isAdmin, showAdminLogin, logoutAdmin, openProductModal, saveProduct, deleteProduct,
                     addBatchItem, removeBatchItem, submitBatch, onPhotoSelected, clearPhoto,
                     openCategoryManager, addCategory, removeCategory, newCategoryName, addStaff, editStaff, updateStaff, deleteStaff, newStaffName, editStaffModal,
                     exportBackup, restoreBackup, saveGlobalLimit, deleteRecord,
                     openScannerForStockFind, openScannerForBatchAdd, scannerVisible, scannerErr, closeScanner,
-                    productModal, categoryManagerVisible, toastMsg, showFullImage
+                    productModal, categoryManagerVisible, toastMsg, showFullImage,
+                    scanBarcodeForProduct
                 };
             }
         }).mount('#app');
