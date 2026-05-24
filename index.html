@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <title>智能出入库 - Storage 优化版</title>
+    <title>智能出入库 - 压缩上传·管理员可删记录</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -17,7 +17,7 @@
         .tab-btn{flex:1;text-align:center;padding:6px 0;border-radius:32px;background:transparent;border:none;font-weight:500;font-size:0.85rem;cursor:pointer}
         .tab-btn.active{background:white;box-shadow:0 1px 4px rgba(0,0,0,0.05);color:#0f3b3a}
         .card{background:white;border-radius:20px;padding:12px;margin-bottom:16px;border:1px solid #eef2f6}
-        .card-title{font-weight:600;font-size:0.95rem;margin-bottom:12px;border-left:3px solid #14b8a6;padding-left:10px;display:flex;justify-content:space-between}
+        .card-title{font-weight:600;font-size:0.95rem;margin-bottom:12px;border-left:3px solid #14b8a6;padding-left:10px;display:flex;justify-content:space-between;align-items:center}
         .btn-sm{background:#f1f5f9;border:none;padding:4px 10px;border-radius:32px;cursor:pointer;font-size:0.7rem}
         .btn-primary{background:#0f172a;color:white;border:none;padding:8px 14px;border-radius:40px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:0.85rem}
         .btn-danger{background:#fee2e2;color:#b91c1c}
@@ -30,6 +30,8 @@
         .stock-badge{background:#e6f7f5;padding:2px 8px;border-radius:30px;font-weight:600;font-size:0.75rem}
         .stock-warning{background:#fee2e2;color:#b91c1c}
         .record-item{font-size:0.75rem;border-bottom:1px solid #f0f2f5;padding:8px 0}
+        .record-header{display:flex;justify-content:space-between;align-items:center}
+        .delete-record{color:#b91c1c;cursor:pointer;margin-left:8px;font-size:0.7rem;background:#fee2e2;padding:2px 8px;border-radius:20px}
         .modal-mask{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:1000}
         .modal-container{background:white;width:90%;max-width:400px;border-radius:28px;padding:16px;max-height:80vh;overflow:auto}
         .batch-row{background:#f8fafc;border-radius:16px;padding:10px;margin-bottom:10px;border:1px solid #e2e8f0}
@@ -63,7 +65,7 @@
             <button @click="activeTab='settings'" :class="['tab-btn',{active:activeTab==='settings'}]"><i class="fas fa-cog"></i> 设置</button>
         </div>
 
-        <!-- 库存（不变） -->
+        <!-- 库存 -->
         <div v-show="activeTab==='stock'">
             <div class="flex-between" style="margin-bottom:10px;">
                 <span class="card-title" style="border-left:none;padding-left:0;">📦 商品</span>
@@ -91,7 +93,7 @@
             </div>
         </div>
 
-        <!-- 批量出入库（支持 Storage 上传） -->
+        <!-- 批量出入库（带图片压缩） -->
         <div v-show="activeTab==='batch'">
             <div class="card">
                 <div class="card-title">📝 批量出入库 <button class="btn-sm" @click="openScannerForBatchAdd"><i class="fas fa-camera"></i> 扫码添加</button></div>
@@ -115,7 +117,7 @@
                 <div class="form-group">
                     <label>照片凭证 <span class="required-star">*</span></label>
                     <input type="file" accept="image/*" @change="onPhotoSelected" ref="photoInput">
-                    <div v-if="photoProcessing" class="photo-loading mt-2"><i class="fas fa-spinner fa-pulse"></i> 上传中...</div>
+                    <div v-if="photoProcessing" class="status-bar"><i class="fas fa-spinner fa-pulse"></i> 压缩上传中...</div>
                     <div v-if="batchPhotoPreview"><img :src="batchPhotoPreview" style="max-width:70px;border-radius:10px;margin-top:6px;"></div>
                     <button class="btn-sm" @click="clearPhoto" v-if="batchPhotoPreview">清除</button>
                 </div>
@@ -124,38 +126,38 @@
             </div>
         </div>
 
-        <!-- 记录列表（支持 photo_url） -->
+        <!-- 记录列表（管理员可删除） -->
         <div v-show="activeTab==='records'">
             <div class="card-title">📋 历史流水 <span style="font-size:0.7rem;">(最新在上)</span></div>
             <div v-if="transactions.length===0" class="text-center">暂无记录</div>
             <div v-for="t in transactions" :key="t.id" class="record-item">
-                <div class="flex-between"><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type==='in'?'badge-in':'badge-out'">{{ t.type==='in'?'入库':'出库' }}</span><span>数量:{{ t.quantity }}</span></div>
+                <div class="record-header">
+                    <div><strong>{{ getProductName(t.product_id) }}</strong> <span :class="t.type==='in'?'badge-in':'badge-out'">{{ t.type==='in'?'入库':'出库' }}</span> 数量:{{ t.quantity }}</div>
+                    <div v-if="isAdmin" class="delete-record" @click="deleteRecord(t.id)"><i class="fas fa-trash-alt"></i> 删除</div>
+                </div>
                 <div class="flex-between"><span>{{ formatDate(t.timestamp) }}</span><span>经手:{{ t.staff_name||'未知' }}</span></div>
                 <div v-if="t.remark_text">📝 {{ t.remark_text }}</div>
                 <div>
-                    <!-- 优先显示新 photo_url，回退旧 photo_data -->
                     <img v-if="t.photo_url" :src="t.photo_url" class="photo-thumb" @click="showFullImage(t.photo_url)">
                     <img v-else-if="t.photo_data" :src="t.photo_data" class="photo-thumb" @click="showFullImage(t.photo_data)">
                 </div>
             </div>
         </div>
 
-        <!-- 人员管理（不变） -->
+        <!-- 人员管理 -->
         <div v-show="activeTab==='staff'">
             <div class="card"><div class="card-title">👥 人员管理</div><div v-if="!isAdmin" class="text-center" style="padding:24px;">请以管理员身份登录</div>
             <template v-else><div class="flex-between" style="margin-bottom:12px;"><input v-model="newStaffName" placeholder="姓名" style="flex:1;"><button class="btn-primary" @click="addStaff">添加</button></div>
             <div v-for="s in staffList" :key="s.id" class="flex-between" style="padding:8px 0;"><span>{{ s.name }}</span><div><button class="btn-sm" @click="editStaff(s)">编辑</button><button class="btn-sm btn-danger" @click="deleteStaff(s.id)">删除</button></div></div></template></div>
         </div>
 
-        <!-- 设置（增加迁移助手） -->
+        <!-- 设置（移除迁移和性能说明） -->
         <div v-show="activeTab==='settings'">
             <div class="card"><div class="card-title">⚙️ 系统配置</div><div class="form-group"><label>全局入库上限（件/次）</label><input type="number" v-model.number="globalInboundLimit" :disabled="!isAdmin"><button v-if="isAdmin" class="btn-primary" @click="saveGlobalLimit">保存</button></div></div>
             <div class="card"><div class="card-title">💾 备份/恢复</div><div class="flex-between"><button class="btn-primary" @click="exportBackup">备份数据</button><label class="btn-primary" style="background:#334155;">恢复备份<input type="file" accept=".json" @change="restoreBackup" style="display:none;"></label></div></div>
-            <div class="card"><div class="card-title">📸 历史照片迁移</div><p class="text-center" style="font-size:0.75rem;">将旧版Base64照片转存到Storage，释放数据库空间</p><button class="btn-primary w-100" @click="migrateOldPhotos" :disabled="migrating">开始迁移</button><div v-if="migrating" class="status-bar">迁移中... {{ migratedCount }}/{{ totalOldCount }}</div></div>
-            <div class="card"><div class="card-title">🚀 性能说明</div><p class="text-center" style="font-size:0.7rem;">照片已使用 Supabase Storage 存储，显著降低数据库压力，加载更快。</p></div>
         </div>
 
-        <!-- 模态框（不变） -->
+        <!-- 模态框 -->
         <div v-if="productModal.show" class="modal-mask" @click.self="productModal.show=false"><div class="modal-container"><h3>{{ productModal.isEdit?'编辑':'新增' }}商品</h3><input v-model="productModal.form.name" placeholder="名称"><input v-model="productModal.form.barcode" placeholder="条码"><input v-model="productModal.form.category" placeholder="分类" list="catOpts"><datalist id="catOpts"><option v-for="c in categoryList" :value="c"></option></datalist><input v-if="!productModal.isEdit" type="number" v-model="productModal.form.stock" placeholder="初始库存"><div class="form-group"><label>单次入库上限 (0或留空=使用全局)</label><input type="number" v-model.number="productModal.form.inbound_limit_per_time" placeholder="例如 20"></div><div class="flex-between"><button class="btn-outline" @click="productModal.show=false">取消</button><button class="btn-primary" @click="saveProduct">保存</button></div></div></div>
         <div v-if="categoryManagerVisible" class="modal-mask" @click.self="categoryManagerVisible=false"><div class="modal-container"><h3>管理分类</h3><div class="flex-between"><input v-model="newCategoryName" placeholder="新分类"><button class="btn-primary" @click="addCategory">添加</button></div><div v-for="cat in categoryList" :key="cat" class="flex-between" style="padding:6px 0;"><span>{{ cat }}</span><button class="btn-sm btn-danger" @click="removeCategory(cat)">删除</button></div><button class="btn-outline w-100 mt-2" @click="categoryManagerVisible=false">关闭</button></div></div>
         <div v-if="editStaffModal.show" class="modal-mask" @click.self="editStaffModal.show=false"><div class="modal-container"><h3>编辑人员</h3><input v-model="editStaffModal.name"><div class="flex-between mt-2"><button class="btn-outline" @click="editStaffModal.show=false">取消</button><button class="btn-primary" @click="updateStaff">保存</button></div></div></div>
@@ -190,16 +192,13 @@
                 const globalInboundLimit = ref(100);
                 const batchItems = ref([{ productId: null, type: 'in', quantity: 1 }]);
                 const batchRemark = ref('');
-                const batchPhotoFile = ref(null);   // 存储原始文件对象
+                const batchPhotoFile = ref(null);
                 const batchPhotoPreview = ref('');
                 const selectedStaff = ref(null);
                 const photoInput = ref(null);
                 const toastMsg = ref('');
                 const networkReady = ref(true);
                 const photoProcessing = ref(false);
-                const migrating = ref(false);
-                const migratedCount = ref(0);
-                const totalOldCount = ref(0);
                 let toastTimer = null;
 
                 const productModal = ref({ show: false, isEdit: false, form: { id: null, name: '', barcode: '', category: '', stock: 0, inbound_limit_per_time: null } });
@@ -237,7 +236,39 @@
                     return globalInboundLimit.value;
                 };
 
-                // 缓存操作
+                // 图片压缩函数 (宽度限制800，质量0.7)
+                const compressImage = (file) => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const img = new Image();
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                let width = img.width;
+                                let height = img.height;
+                                const maxWidth = 800;
+                                if (width > maxWidth) {
+                                    height = (height * maxWidth) / width;
+                                    width = maxWidth;
+                                }
+                                canvas.width = width;
+                                canvas.height = height;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0, width, height);
+                                canvas.toBlob(blob => {
+                                    const compressedFile = new File([blob], file.name, { type: 'image/jpeg' });
+                                    resolve(compressedFile);
+                                }, 'image/jpeg', 0.7);
+                            };
+                            img.onerror = reject;
+                            img.src = e.target.result;
+                        };
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                };
+
+                // 缓存
                 const saveCache = () => {
                     localStorage.setItem('inv_products', JSON.stringify(products.value));
                     localStorage.setItem('inv_transactions', JSON.stringify(transactions.value));
@@ -248,20 +279,15 @@
 
                 const loadCache = () => {
                     try {
-                        const p = localStorage.getItem('inv_products');
-                        if(p) products.value = JSON.parse(p);
-                        const t = localStorage.getItem('inv_transactions');
-                        if(t) transactions.value = JSON.parse(t);
-                        const s = localStorage.getItem('inv_staff');
-                        if(s) staffList.value = JSON.parse(s);
-                        const c = localStorage.getItem('inv_cats');
-                        if(c) categoryList.value = JSON.parse(c);
-                        const limit = localStorage.getItem('inv_limit');
-                        if(limit) globalInboundLimit.value = parseInt(limit) || 100;
+                        const p = localStorage.getItem('inv_products'); if(p) products.value = JSON.parse(p);
+                        const t = localStorage.getItem('inv_transactions'); if(t) transactions.value = JSON.parse(t);
+                        const s = localStorage.getItem('inv_staff'); if(s) staffList.value = JSON.parse(s);
+                        const c = localStorage.getItem('inv_cats'); if(c) categoryList.value = JSON.parse(c);
+                        const limit = localStorage.getItem('inv_limit'); if(limit) globalInboundLimit.value = parseInt(limit) || 100;
                     } catch(e) { console.warn(e); }
                 };
 
-                // 后台静默刷新
+                // 后台刷新
                 const silentRefresh = async () => {
                     try {
                         const [prods, trans, staffs] = await Promise.all([
@@ -282,7 +308,6 @@
                         const { data: limitData } = await supabase.from('system_config').select('value').eq('key', 'inbound_limit').single();
                         if(limitData) globalInboundLimit.value = parseInt(limitData.value) || 100;
                         else await supabase.from('system_config').insert({ key: 'inbound_limit', value: '100' });
-                        
                         saveCache();
                         networkReady.value = true;
                     } catch(e) {
@@ -298,19 +323,19 @@
                     showToast('全局上限已保存');
                 };
 
-                // 上传图片到 Storage 并返回公共 URL
+                // 上传图片到 Storage (先压缩)
                 const uploadPhoto = async (file) => {
                     if(!file) return null;
-                    const fileExt = file.name.split('.').pop();
+                    const compressed = await compressImage(file);
+                    const fileExt = compressed.name.split('.').pop();
                     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
-                    const filePath = `${fileName}`;
-                    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(filePath, file);
+                    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, compressed);
                     if(error) throw new Error('上传失败: ' + error.message);
-                    const { data: publicUrlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
+                    const { data: publicUrlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
                     return publicUrlData.publicUrl;
                 };
 
-                // 批量提交（先上传图片，再并行更新库存和记录）
+                // 批量提交（先压缩再上传）
                 const submitBatch = async () => {
                     if(!batchPhotoFile.value) { showToast('请拍摄或上传照片凭证'); return; }
                     if(!selectedStaff.value) { showToast('请选择经手人'); return; }
@@ -348,14 +373,12 @@
                     photoProcessing.value = false;
 
                     try {
-                        // 并行更新库存
                         const updatePromises = itemsToProcess.map(item => 
                             supabase.from('products').update({ stock: item.newStock }).eq('id', item.id)
                         );
                         const updateResults = await Promise.all(updatePromises);
                         if(updateResults.some(r => r.error)) throw new Error('库存更新失败');
 
-                        // 并行插入记录（存储 photo_url）
                         const insertPromises = itemsToProcess.map(item =>
                             supabase.from('transactions').insert({
                                 product_id: item.id,
@@ -389,11 +412,9 @@
                 const onPhotoSelected = (e) => {
                     const file = e.target.files[0];
                     if(!file) return;
-                    // 预览
+                    // 显示原图预览（压缩前预览）
                     const reader = new FileReader();
-                    reader.onload = (ev) => {
-                        batchPhotoPreview.value = ev.target.result;
-                    };
+                    reader.onload = (ev) => { batchPhotoPreview.value = ev.target.result; };
                     reader.readAsDataURL(file);
                     batchPhotoFile.value = file;
                 };
@@ -401,6 +422,20 @@
                     batchPhotoFile.value = null;
                     batchPhotoPreview.value = '';
                     if(photoInput.value) photoInput.value.value = '';
+                };
+
+                // 删除单条记录
+                const deleteRecord = async (recordId) => {
+                    if(!isAdmin.value) { showToast('无权限'); return; }
+                    if(!confirm('确定删除这条记录吗？此操作不可恢复。')) return;
+                    try {
+                        const { error } = await supabase.from('transactions').delete().eq('id', recordId);
+                        if(error) throw error;
+                        await silentRefresh();
+                        showToast('记录已删除');
+                    } catch(e) {
+                        showToast('删除失败: ' + e.message);
+                    }
                 };
 
                 // 商品 CRUD
@@ -483,7 +518,7 @@
                 const addBatchItem = () => batchItems.value.push({ productId: null, type: 'in', quantity: 1 });
                 const removeBatchItem = (idx) => batchItems.value.splice(idx, 1);
 
-                // 备份恢复（注意 photo_url 的处理）
+                // 备份恢复
                 const exportBackup = () => {
                     const backup = {
                         products: products.value,
@@ -525,43 +560,7 @@
                     e.target.value = '';
                 };
 
-                // 历史照片迁移：将 photo_data 中的 Base64 转存到 Storage，并更新 photo_url
-                const migrateOldPhotos = async () => {
-                    if(!isAdmin.value) { showToast('请先登录管理员'); return; }
-                    const oldRecords = transactions.value.filter(t => t.photo_data && !t.photo_url);
-                    if(oldRecords.length === 0) { showToast('没有需要迁移的旧照片'); return; }
-                    if(!confirm(`发现 ${oldRecords.length} 条旧照片记录，将转存到 Storage，这可能需要一些时间。是否继续？`)) return;
-                    migrating.value = true;
-                    totalOldCount.value = oldRecords.length;
-                    migratedCount.value = 0;
-                    let successCount = 0;
-                    for(let record of oldRecords) {
-                        try {
-                            // 将 base64 转为 Blob
-                            const base64 = record.photo_data;
-                            const mime = base64.match(/^data:image\/(\w+);base64,/);
-                            const ext = mime ? mime[1] : 'jpg';
-                            const blob = await fetch(base64).then(res => res.blob());
-                            const file = new File([blob], `migrate_${record.id}.${ext}`, { type: blob.type });
-                            // 上传
-                            const fileName = `migrated/${Date.now()}_${record.id}.${ext}`;
-                            const { error: uploadErr } = await supabase.storage.from(STORAGE_BUCKET).upload(fileName, file);
-                            if(uploadErr) throw uploadErr;
-                            const { data: pubUrl } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(fileName);
-                            // 更新记录
-                            await supabase.from('transactions').update({ photo_url: pubUrl.publicUrl }).eq('id', record.id);
-                            successCount++;
-                        } catch(e) {
-                            console.error('迁移失败', record.id, e);
-                        }
-                        migratedCount.value++;
-                    }
-                    await silentRefresh();
-                    migrating.value = false;
-                    showToast(`迁移完成！成功 ${successCount}/${oldRecords.length}`);
-                };
-
-                // 扫码逻辑（不变）
+                // 扫码逻辑
                 const startScanner = (callback) => {
                     return new Promise((resolve, reject) => {
                         scannerVisible.value = true;
@@ -684,12 +683,12 @@
                 return {
                     activeTab, products, transactions, staffList, categoryList, selectedCategory, submitting,
                     batchItems, batchRemark, batchPhotoPreview, selectedStaff, globalInboundLimit, photoInput, networkReady,
-                    photoProcessing, migrating, migratedCount, totalOldCount,
+                    photoProcessing,
                     filteredProducts, formatDate, getProductName, getItemLimit,
                     isAdmin, showAdminLogin, logoutAdmin, openProductModal, saveProduct, deleteProduct,
                     addBatchItem, removeBatchItem, submitBatch, onPhotoSelected, clearPhoto,
                     openCategoryManager, addCategory, removeCategory, newCategoryName, addStaff, editStaff, updateStaff, deleteStaff, newStaffName, editStaffModal,
-                    exportBackup, restoreBackup, saveGlobalLimit, migrateOldPhotos,
+                    exportBackup, restoreBackup, saveGlobalLimit, deleteRecord,
                     openScannerForStockFind, openScannerForBatchAdd, scannerVisible, scannerErr, closeScanner,
                     productModal, categoryManagerVisible, toastMsg, showFullImage
                 };
